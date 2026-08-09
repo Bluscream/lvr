@@ -58,6 +58,14 @@ impl Status {
     pub fn running_entry_count(&self) -> usize {
         self.entries.iter().filter(|e| e.running).count()
     }
+
+    pub fn friendly_sink_label(&self) -> String {
+        friendly_label(&self.default_sink, &self.sinks)
+    }
+
+    pub fn friendly_source_label(&self) -> String {
+        friendly_label(&self.default_source, &self.sources)
+    }
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -90,6 +98,64 @@ impl AudioDevice {
         } else {
             &self.description
         }
+    }
+}
+
+pub fn friendly_label(name: &str, devices: &[AudioDevice]) -> String {
+    let name_trimmed = name.trim();
+    if name_trimmed.is_empty() {
+        return "unknown".to_string();
+    }
+    if let Some(dev) = devices.iter().find(|d| d.name == name_trimmed) {
+        let label = dev.label().trim();
+        if !label.is_empty() {
+            return label.to_string();
+        }
+    }
+    if name_trimmed == "wivrn.sink" {
+        return "WiVRn Sink".to_string();
+    }
+    if name_trimmed == "wivrn.source" {
+        return "WiVRn Source".to_string();
+    }
+    clean_node_name(name_trimmed)
+}
+
+fn clean_node_name(name: &str) -> String {
+    let mut cleaned = name;
+    for prefix in &["alsa_output.", "alsa_input.", "bluez_output.", "bluez_input."] {
+        if let Some(rest) = cleaned.strip_prefix(prefix) {
+            cleaned = rest;
+            break;
+        }
+    }
+    if let Some(pos) = cleaned.rfind('.') {
+        if pos > 0 && pos < cleaned.len() - 1 {
+            let suffix = &cleaned[pos + 1..];
+            if suffix.contains("stereo") || suffix.contains("mono") || suffix.contains("multichannel") {
+                cleaned = &cleaned[..pos];
+            }
+        }
+    }
+    if let Some(rest) = cleaned.strip_prefix("usb-") {
+        cleaned = rest;
+    } else if let Some(rest) = cleaned.strip_prefix("pci-") {
+        cleaned = rest;
+    }
+    let mut result = String::new();
+    for part in cleaned.split(['_', '-']) {
+        if part.chars().all(|c| c.is_ascii_hexdigit()) {
+            continue;
+        }
+        if !result.is_empty() {
+            result.push(' ');
+        }
+        result.push_str(part);
+    }
+    if result.trim().is_empty() {
+        name.to_string()
+    } else {
+        result
     }
 }
 
@@ -311,6 +377,25 @@ fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn friendly_label_uses_device_description_or_clean_name() {
+        let devices = vec![AudioDevice {
+            name: "alsa_output.usb-Smartlink_123.analog-stereo".into(),
+            description: "Smartlink WG2 Headset".into(),
+        }];
+        assert_eq!(
+            friendly_label("alsa_output.usb-Smartlink_123.analog-stereo", &devices),
+            "Smartlink WG2 Headset"
+        );
+        assert_eq!(friendly_label("wivrn.sink", &[]), "WiVRn Sink");
+        assert_eq!(friendly_label("wivrn.source", &[]), "WiVRn Source");
+        assert_eq!(friendly_label("", &[]), "unknown");
+        assert_eq!(
+            friendly_label("alsa_output.usb-SmartlinkTechnology_WG2_20201111000001-00.analog-stereo", &[]),
+            "SmartlinkTechnology WG2"
+        );
+    }
 
     fn shared() -> Shared {
         Shared::new(Config::default(), PathBuf::from("/nonexistent/config.toml")).0

@@ -337,8 +337,8 @@ fn print_status(status: &state::Status) {
     }
     println!("xr session      : {}", yes_no(status.session_running));
     println!("vrchat running  : {}", yes_no(status.vrchat_running));
-    println!("default output  : {}", status.default_sink);
-    println!("default input   : {}", status.default_source);
+    println!("default output  : {}", status.friendly_sink_label());
+    println!("default input   : {}", status.friendly_source_label());
     println!("audio on vr     : {}", yes_no(status.audio_on_vr));
     println!(
         "audio devices   : {} outputs, {} inputs",

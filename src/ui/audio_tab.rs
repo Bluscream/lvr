@@ -41,27 +41,19 @@ fn current_state(app: &LvrApp, ui: &mut Ui) {
             },
             if app.status.audio_on_vr { GREEN } else { BLUE },
         );
-        widgets::pill(ui, "Default output", &short(&app.status.default_sink), GREY);
+        widgets::pill(
+            ui,
+            "Default output",
+            &app.status.friendly_sink_label(),
+            GREY,
+        );
         widgets::pill(
             ui,
             "Default input",
-            &short(&app.status.default_source),
+            &app.status.friendly_source_label(),
             GREY,
         );
     });
-}
-
-fn short(name: &str) -> String {
-    if name.is_empty() {
-        return "unknown".to_string();
-    }
-    let chars: Vec<char> = name.chars().collect();
-    if chars.len() > 42 {
-        let tail: String = chars[chars.len() - 41..].iter().collect();
-        format!("…{tail}")
-    } else {
-        name.to_string()
-    }
 }
 
 fn settings(app: &mut LvrApp, ui: &mut Ui) {
@@ -231,15 +223,11 @@ fn manual_controls(app: &mut LvrApp, ui: &mut Ui) {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use crate::state::friendly_label;
 
     #[test]
-    fn short_handles_empty_and_long_names() {
-        assert_eq!(short(""), "unknown");
-        assert_eq!(short("wivrn.sink"), "wivrn.sink");
-        let long = "a".repeat(80);
-        let shortened = short(&long);
-        assert!(shortened.starts_with('…'));
-        assert_eq!(shortened.chars().count(), 42);
+    fn friendly_label_handles_empty_and_wivrn_names() {
+        assert_eq!(friendly_label("", &[]), "unknown");
+        assert_eq!(friendly_label("wivrn.sink", &[]), "WiVRn Sink");
     }
 }
