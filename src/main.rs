@@ -135,7 +135,7 @@ fn main() -> Result<()> {
             .build()
             .context("starting the tokio runtime")?;
         let status = runtime.block_on(engine::probe(&config));
-        print_status(&status);
+        print_status(&status, config.general.show_debug_info);
         return Ok(());
     }
 
@@ -328,7 +328,7 @@ fn print_check(config: &Config, path: &std::path::Path) {
     }
 }
 
-fn print_status(status: &state::Status) {
+fn print_status(status: &state::Status, show_debug: bool) {
     let yes_no = |value: bool| if value { "yes" } else { "no" };
     println!("wivrn running   : {}", yes_no(status.wivrn_running));
     println!("headset         : {}", yes_no(status.headset_connected));
@@ -347,13 +347,22 @@ fn print_status(status: &state::Status) {
     );
     println!("managed apps    :");
     for entry in &status.entries {
-        println!(
-            "  {:<16} running={:<4} trigger={:<4} pids={:?}",
-            entry.name,
-            yes_no(entry.running),
-            yes_no(entry.trigger_active),
-            entry.pids
-        );
+        if show_debug {
+            println!(
+                "  {:<16} running={:<4} trigger={:<4} pids={:?}",
+                entry.name,
+                yes_no(entry.running),
+                yes_no(entry.trigger_active),
+                entry.pids
+            );
+        } else {
+            println!(
+                "  {:<16} running={:<4} trigger={:<4}",
+                entry.name,
+                yes_no(entry.running),
+                yes_no(entry.trigger_active)
+            );
+        }
     }
 }
 

@@ -19,11 +19,11 @@ const CELL_PADDING: f32 = 16.0;
 const STATUS_TEXT_SIZE: f32 = 11.0;
 /// Room for the status dot that sits left of the wrapped text.
 const STATUS_DOT_WIDTH: f32 = 20.0;
-/// Floor for any row in compact mode.
-const MIN_ROW_HEIGHT: f32 = 28.0;
+/// Floor for rows: larger to fit name and console subtext comfortably.
+const MIN_ROW_HEIGHT: f32 = 36.0;
 
 /// Compact widths of the action buttons, in the order they are drawn.
-const ACTION_BUTTON_WIDTHS: [f32; 5] = [54.0, 50.0, 34.0, 44.0, 60.0];
+const ACTION_BUTTON_WIDTHS: [f32; 5] = [48.0, 44.0, 30.0, 40.0, 52.0];
 
 /// Exact width the action column needs for every button plus the gaps.
 fn actions_column_width(item_spacing: f32) -> f32 {
@@ -41,7 +41,7 @@ fn row_height(ui: &egui::Ui, status_text: &str, status_width: f32) -> f32 {
         egui::Color32::PLACEHOLDER,
         wrap_width,
     );
-    (galley.size().y + 6.0).max(MIN_ROW_HEIGHT)
+    (galley.size().y + 8.0).max(MIN_ROW_HEIGHT)
 }
 
 /// Pending structural change, applied after the table is drawn so we never
@@ -179,20 +179,20 @@ pub fn show(app: &mut LvrApp, ui: &mut Ui) {
                     });
                     row.col(|ui| {
                         if status.running {
-                            if widgets::compact_button(ui, "Stop", Some(ORANGE), 54.0).clicked() {
+                            if widgets::compact_button(ui, "Stop", Some(ORANGE), 48.0).clicked() {
                                 pending = Some(Pending::Stop(entry.id.clone()));
                             }
-                        } else if widgets::compact_button(ui, "Start", Some(GREEN), 54.0).clicked() {
+                        } else if widgets::compact_button(ui, "Start", Some(GREEN), 48.0).clicked() {
                             pending = Some(Pending::Start(entry.id.clone()));
                         }
-                        if widgets::compact_button(ui, "Edit", None, 50.0).clicked() {
+                        if widgets::compact_button(ui, "Edit", None, 44.0).clicked() {
                             pending = Some(Pending::Edit(entry.id.clone()));
                         }
                         if ui
                             .add_enabled(
                                 index > 0,
-                                egui::Button::new(RichText::new("Up").size(12.0))
-                                    .min_size(egui::vec2(34.0, 22.0)),
+                                egui::Button::new(RichText::new("Up").size(11.0))
+                                    .min_size(egui::vec2(30.0, 17.0)),
                             )
                             .clicked()
                         {
@@ -201,14 +201,14 @@ pub fn show(app: &mut LvrApp, ui: &mut Ui) {
                         if ui
                             .add_enabled(
                                 index + 1 < entries.len(),
-                                egui::Button::new(RichText::new("Down").size(12.0))
-                                    .min_size(egui::vec2(44.0, 22.0)),
+                                egui::Button::new(RichText::new("Down").size(11.0))
+                                    .min_size(egui::vec2(40.0, 17.0)),
                             )
                             .clicked()
                         {
                             pending = Some(Pending::MoveDown(index));
                         }
-                        if widgets::compact_button(ui, "Delete", Some(RED), 60.0).clicked() {
+                        if widgets::compact_button(ui, "Delete", Some(RED), 52.0).clicked() {
                             pending = Some(Pending::Delete(entry.id.clone()));
                         }
                     });
@@ -439,7 +439,7 @@ mod tests {
             width >= needed,
             "action column {width} cannot hold {needed} of buttons"
         );
-        assert_eq!(width, 282.0);
+        assert_eq!(width, 254.0);
     }
 
     #[test]

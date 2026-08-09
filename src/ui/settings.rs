@@ -105,7 +105,7 @@ fn general(app: &mut LvrApp, ui: &mut Ui) {
             }
             ui.end_row();
 
-            ui.label("Stop grace (SIGTERM→SIGKILL)");
+            ui.label("Stop grace (SIGTERM->SIGKILL)");
             {
                 let mut config = app.shared.config();
                 ui.add(

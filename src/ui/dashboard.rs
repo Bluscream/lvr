@@ -118,10 +118,10 @@ fn actions(app: &mut LvrApp, ui: &mut Ui) {
 
     ui.horizontal_wrapped(|ui| {
         if app.status.audio_on_vr {
-            if widgets::big_button(ui, "Audio → Desktop", Some(BLUE), button_width).clicked() {
+            if widgets::big_button(ui, "Audio -> Desktop", Some(BLUE), button_width).clicked() {
                 app.shared.send(Command::SetAudioVr(false));
             }
-        } else if widgets::big_button(ui, "Audio → VR", Some(BLUE), button_width).clicked() {
+        } else if widgets::big_button(ui, "Audio -> VR", Some(BLUE), button_width).clicked() {
             app.shared.send(Command::SetAudioVr(true));
         }
         if widgets::big_button(ui, "Start all triggered", Some(GREEN), button_width).clicked() {
