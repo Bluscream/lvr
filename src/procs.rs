@@ -189,9 +189,12 @@ const TERMINALS: &[(&str, &str)] = &[
     ("ptyxis", "ptyxis -- sh -c {cmd}"),
     ("kgx", "kgx -- sh -c {cmd}"),
     ("gnome-terminal", "gnome-terminal -- sh -c {cmd}"),
+    ("ghostty", "ghostty -e sh -c {cmd}"),
+    ("wezterm", "wezterm start -- sh -c {cmd}"),
     ("alacritty", "alacritty -e sh -c {cmd}"),
     ("kitty", "kitty sh -c {cmd}"),
     ("foot", "foot sh -c {cmd}"),
+    ("rio", "rio -e sh -c {cmd}"),
     ("xfce4-terminal", "xfce4-terminal -x sh -c {cmd}"),
     ("xterm", "xterm -e sh -c {cmd}"),
 ];
@@ -207,8 +210,17 @@ pub fn detect_terminal() -> Option<&'static str> {
 /// Look a binary up on `PATH`, preferring `/usr/bin` so distro tools win over
 /// whatever a user's Homebrew/Nix prefix shadowed them with.
 pub fn which(binary: &str) -> Option<PathBuf> {
-    if binary.contains('/') {
-        let path = PathBuf::from(binary);
+    let path = if let Some(rest) = binary.strip_prefix("~/") {
+        if let Some(home) = std::env::var_os("HOME") {
+            PathBuf::from(home).join(rest)
+        } else {
+            PathBuf::from(binary)
+        }
+    } else {
+        PathBuf::from(binary)
+    };
+
+    if path.is_absolute() || path.components().count() > 1 {
         return is_executable(&path).then_some(path);
     }
     let preferred = PathBuf::from("/usr/bin").join(binary);
@@ -503,6 +515,16 @@ mod tests {
     fn which_finds_core_utilities_and_rejects_nonsense() {
         assert!(which("sh").is_some());
         assert!(which("definitely-not-a-real-binary-xyz").is_none());
+    }
+
+    #[test]
+    fn which_expands_tilde_paths() {
+        if let Some(home) = std::env::var_os("HOME") {
+            let tilde_path = "~/bin/definitely-not-a-real-binary-xyz";
+            let expected = PathBuf::from(home).join("bin/definitely-not-a-real-binary-xyz");
+            let resolved = which(tilde_path);
+            assert_eq!(resolved, is_executable(&expected).then_some(expected));
+        }
     }
 
     #[test]
