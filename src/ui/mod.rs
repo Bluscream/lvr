@@ -267,7 +267,7 @@ impl LvrApp {
         ctx.show_viewport_immediate(viewport_id, builder, |ctx, class| {
             let render_content = |ui: &mut egui::Ui, editor: &mut EntryEditor, close_and_save: &mut bool, cancel: &mut bool| {
                 egui::Panel::bottom("editor_footer")
-                    .show_inside(ui, |ui| {
+                    .show(ui, |ui| {
                         ui.add_space(6.0);
                         if let Some(error) = &editor.error {
                             ui.label(RichText::new(error).color(widgets::RED).size(14.0));
@@ -285,10 +285,8 @@ impl LvrApp {
                         ui.add_space(6.0);
                     });
 
-                egui::CentralPanel::default().show(ui, |ui| {
-                    egui::ScrollArea::vertical().show(ui, |ui| {
-                        autostart::editor_body(ui, editor);
-                    });
+                egui::ScrollArea::vertical().show(ui, |ui| {
+                    autostart::editor_body(ui, editor);
                 });
             };
 
