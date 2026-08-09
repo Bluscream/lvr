@@ -189,6 +189,8 @@ pub struct General {
     pub relaunch_debounce_secs: u64,
     /// How long a stopped app gets to exit on SIGTERM before it is SIGKILLed.
     pub stop_grace_secs: u64,
+    /// Show PIDs and extra debug information in status labels.
+    pub show_debug_info: bool,
 }
 
 impl Default for General {
@@ -204,6 +206,7 @@ impl Default for General {
             log_capacity: 1000,
             relaunch_debounce_secs: 30,
             stop_grace_secs: 5,
+            show_debug_info: false,
         }
     }
 }

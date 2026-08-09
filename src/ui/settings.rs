@@ -70,6 +70,17 @@ fn general(app: &mut LvrApp, ui: &mut Ui) {
             }
             ui.end_row();
 
+            ui.label("Show debug info");
+            {
+                let mut config = app.shared.config();
+                widgets::toggle(
+                    ui,
+                    &mut config.general.show_debug_info,
+                    "show PIDs and process details in the status column",
+                );
+            }
+            ui.end_row();
+
             ui.label("Poll interval");
             {
                 let mut config = app.shared.config();

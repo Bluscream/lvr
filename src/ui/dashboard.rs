@@ -162,7 +162,14 @@ fn managed_apps(app: &mut LvrApp, ui: &mut Ui) {
                     ui.label(RichText::new("⏺").size(20.0).color(color));
                     ui.vertical(|ui| {
                         ui.label(RichText::new(&entry.name).size(17.0).strong());
-                        ui.label(RichText::new(detail_line(&entry)).size(13.0).color(GREY));
+                        ui.label(
+                            RichText::new(detail_line(
+                                &entry,
+                                app.shared.config().general.show_debug_info,
+                            ))
+                            .size(13.0)
+                            .color(GREY),
+                        );
                     });
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         if entry.running {
@@ -179,32 +186,84 @@ fn managed_apps(app: &mut LvrApp, ui: &mut Ui) {
 }
 
 /// One line of context under an app's name.
-pub fn detail_line(entry: &crate::state::EntryStatus) -> String {
+pub fn detail_line(entry: &crate::state::EntryStatus, show_debug: bool) -> String {
     if let Some(error) = &entry.last_error {
-        return format!("error: {error}");
+        if show_debug {
+            return format!("error: {error} (pids: {:?})", entry.pids);
+        } else {
+            return format!("error: {error}");
+        }
     }
     if let Some(secs) = entry.start_in_secs {
-        return format!("starting in {}", widgets::format_countdown(secs));
+        if show_debug {
+            return format!(
+                "starting in {} [trig_active: {}, suppressed: {}]",
+                widgets::format_countdown(secs),
+                entry.trigger_active,
+                entry.suppressed
+            );
+        } else {
+            return format!("starting in {}", widgets::format_countdown(secs));
+        }
     }
     if let Some(secs) = entry.stop_in_secs {
-        return format!("stopping in {}", widgets::format_countdown(secs));
-    }
-    if entry.running {
         let pids = entry
             .pids
             .iter()
             .map(|p| p.to_string())
             .collect::<Vec<_>>()
             .join(", ");
-        return format!("running — pid {pids}");
+        if show_debug {
+            return format!(
+                "stopping in {} [pid {}, trig_active: {}]",
+                widgets::format_countdown(secs),
+                if pids.is_empty() { "none" } else { &pids },
+                entry.trigger_active
+            );
+        } else {
+            return format!("stopping in {}", widgets::format_countdown(secs));
+        }
+    }
+    if entry.running {
+        if show_debug {
+            let pids = entry
+                .pids
+                .iter()
+                .map(|p| p.to_string())
+                .collect::<Vec<_>>()
+                .join(", ");
+            return format!(
+                "running — pid {} [trig_active: {}, count: {}]",
+                if pids.is_empty() { "none" } else { &pids },
+                entry.trigger_active,
+                entry.pids.len()
+            );
+        } else {
+            return "running".to_string();
+        }
     }
     if entry.suppressed {
-        return "stopped by you — will not auto-start until the trigger cycles".to_string();
+        if show_debug {
+            return format!(
+                "stopped by you [suppressed: true, trig_active: {}, pids: {:?}]",
+                entry.trigger_active, entry.pids
+            );
+        } else {
+            return "stopped by you".to_string();
+        }
     }
     if entry.trigger_active {
-        return "trigger active".to_string();
+        if show_debug {
+            return format!("trigger active [running: false, pids: {:?}]", entry.pids);
+        } else {
+            return "trigger active".to_string();
+        }
     }
-    "idle".to_string()
+    if show_debug {
+        format!("idle [trig_active: false, pids: {:?}]", entry.pids)
+    } else {
+        "idle".to_string()
+    }
 }
 
 #[cfg(test)]
@@ -219,25 +278,28 @@ mod tests {
             pids: vec![42],
             ..Default::default()
         };
-        assert_eq!(detail_line(&entry), "running — pid 42");
+        assert_eq!(detail_line(&entry, false), "running");
+        assert_eq!(detail_line(&entry, true), "running — pid 42 [trig_active: false, count: 1]");
 
         entry.stop_in_secs = Some(90);
-        assert_eq!(detail_line(&entry), "stopping in 1:30");
+        assert_eq!(detail_line(&entry, false), "stopping in 1:30");
+        assert_eq!(detail_line(&entry, true), "stopping in 1:30 [pid 42, trig_active: false]");
 
         entry.start_in_secs = Some(5);
-        assert_eq!(detail_line(&entry), "starting in 5s");
+        assert_eq!(detail_line(&entry, false), "starting in 5s");
 
         entry.last_error = Some("boom".into());
-        assert_eq!(detail_line(&entry), "error: boom");
+        assert_eq!(detail_line(&entry, false), "error: boom");
     }
 
     #[test]
     fn detail_line_describes_idle_states() {
         let mut entry = EntryStatus::default();
-        assert_eq!(detail_line(&entry), "idle");
+        assert_eq!(detail_line(&entry, false), "idle");
+        assert_eq!(detail_line(&entry, true), "idle [trig_active: false, pids: []]");
         entry.trigger_active = true;
-        assert_eq!(detail_line(&entry), "trigger active");
+        assert_eq!(detail_line(&entry, false), "trigger active");
         entry.suppressed = true;
-        assert!(detail_line(&entry).starts_with("stopped by you"));
+        assert_eq!(detail_line(&entry, false), "stopped by you");
     }
 }

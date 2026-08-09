@@ -103,11 +103,12 @@ pub fn show(app: &mut LvrApp, ui: &mut Ui) {
         - CELL_PADDING)
         .max(MIN_STATUS_WIDTH);
 
+    let show_debug = app.shared.config().general.show_debug_info;
     let row_heights: Vec<f32> = entries
         .iter()
         .map(|entry| {
             let status = app.status.entry(&entry.id).cloned().unwrap_or_default();
-            let text = super::dashboard::detail_line(&status);
+            let text = super::dashboard::detail_line(&status, show_debug);
             row_height(ui, &text, status_width)
         })
         .collect();
@@ -168,7 +169,7 @@ pub fn show(app: &mut LvrApp, ui: &mut Ui) {
                             ui.label(RichText::new("⏺").size(13.0).color(color));
                             ui.add(
                                 egui::Label::new(
-                                    RichText::new(super::dashboard::detail_line(&status))
+                                    RichText::new(super::dashboard::detail_line(&status, show_debug))
                                         .size(STATUS_TEXT_SIZE)
                                         .color(GREY),
                                 )
