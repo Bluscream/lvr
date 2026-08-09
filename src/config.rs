@@ -253,7 +253,8 @@ impl Config {
     pub fn save(&self) -> Result<(), String> {
         let path = Self::config_path();
         if let Some(parent) = path.parent() {
-            fs::create_dir_all(parent).map_err(|e| format!("Failed to create config dir: {}", e))?;
+            fs::create_dir_all(parent)
+                .map_err(|e| format!("Failed to create config dir: {}", e))?;
         }
         let json = serde_json::to_string_pretty(self)
             .map_err(|e| format!("Failed to serialize config: {}", e))?;
@@ -299,7 +300,10 @@ mod tests {
             match_patterns: vec!["  VRCVideoCacher ".to_string(), String::new()],
             ..Default::default()
         };
-        assert_eq!(rule.effective_patterns(), vec!["vrcvideocacher".to_string()]);
+        assert_eq!(
+            rule.effective_patterns(),
+            vec!["vrcvideocacher".to_string()]
+        );
     }
 
     #[test]
@@ -335,7 +339,10 @@ mod tests {
         }"#;
         let cfg: Config = serde_json::from_str(json).expect("old configs must still parse");
         assert!(!cfg.auto_restart_wivrn);
-        assert!(cfg.auto_switch_audio, "missing fields fall back to defaults");
+        assert!(
+            cfg.auto_switch_audio,
+            "missing fields fall back to defaults"
+        );
         assert_eq!(cfg.spawn_debounce_secs, 20);
         assert_eq!(cfg.autostart_rules.len(), 1);
         assert_eq!(cfg.autostart_rules[0].grace_period_secs, 120);

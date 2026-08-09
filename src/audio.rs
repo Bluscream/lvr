@@ -95,7 +95,9 @@ impl AudioSwitcher {
     /// Set default sink via pactl
     pub fn set_default_sink(sink: &str) -> bool {
         info!("Setting default audio sink to '{}'", sink);
-        let res = Command::new("pactl").args(["set-default-sink", sink]).status();
+        let res = Command::new("pactl")
+            .args(["set-default-sink", sink])
+            .status();
         match res {
             Ok(s) => s.success(),
             Err(e) => {

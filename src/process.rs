@@ -138,7 +138,10 @@ impl ProcessManager {
 
     /// Launch a rule process
     pub fn spawn_rule(&mut self, rule: &AutostartRule) -> bool {
-        info!("Spawning autostart app: '{}' ({})", rule.name, rule.exec_cmd);
+        info!(
+            "Spawning autostart app: '{}' ({})",
+            rule.name, rule.exec_cmd
+        );
         let mut cmd = StdCommand::new("sh");
         cmd.args(["-c", &rule.exec_cmd]);
 
@@ -179,8 +182,7 @@ impl ProcessManager {
         let deadline = Instant::now() + grace;
         loop {
             std::thread::sleep(Duration::from_millis(200));
-            self.sys
-                .refresh_processes(ProcessesToUpdate::All, true);
+            self.sys.refresh_processes(ProcessesToUpdate::All, true);
             let alive: Vec<u32> = pids
                 .iter()
                 .copied()
@@ -190,7 +192,10 @@ impl ProcessManager {
                 return;
             }
             if Instant::now() >= deadline {
-                warn!("Force killing {} process(es) that ignored SIGTERM", alive.len());
+                warn!(
+                    "Force killing {} process(es) that ignored SIGTERM",
+                    alive.len()
+                );
                 for pid in alive {
                     if let Some(process) = self.sys.process(sysinfo::Pid::from_u32(pid)) {
                         process.kill();

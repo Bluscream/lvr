@@ -1,8 +1,7 @@
 use crate::config::{AutostartRule, TriggerType};
-use crate::service::AppState;
+use crate::service::{AppState, Command};
 use chrono::Local;
-use eframe::egui::{self, Color32, FontId, RichText, Vec2};
-use std::sync::{Arc, Mutex};
+use eframe::egui::{self, Color32, FontId, RichText, Vec2, ViewportCommand};
 
 #[derive(PartialEq)]
 enum Tab {
@@ -14,7 +13,6 @@ enum Tab {
 
 pub struct LinuxVrGui {
     pub state: AppState,
-    pub nuke_trigger: Arc<Mutex<bool>>,
     current_tab: Tab,
 
     // New rule form fields
@@ -24,13 +22,14 @@ pub struct LinuxVrGui {
     new_rule_grace: String,
     new_rule_patterns: String,
     show_add_modal: bool,
+    style_applied: bool,
 }
 
 impl LinuxVrGui {
-    pub fn new(state: AppState, nuke_trigger: Arc<Mutex<bool>>) -> Self {
+    pub fn new(cc: &eframe::CreationContext<'_>, state: AppState) -> Self {
+        state.set_repaint_ctx(cc.egui_ctx.clone());
         Self {
             state,
-            nuke_trigger,
             current_tab: Tab::Dashboard,
             new_rule_name: String::new(),
             new_rule_cmd: String::new(),
@@ -38,6 +37,7 @@ impl LinuxVrGui {
             new_rule_grace: "120".to_string(),
             new_rule_patterns: String::new(),
             show_add_modal: false,
+            style_applied: false,
         }
     }
 
@@ -56,7 +56,8 @@ impl LinuxVrGui {
         visuals.widgets.hovered.bg_fill = Color32::from_rgb(52, 64, 90);
         visuals.widgets.active.bg_fill = Color32::from_rgb(64, 80, 112);
 
-        visuals.widgets.inactive.fg_stroke = egui::Stroke::new(1.5, Color32::from_rgb(220, 230, 245));
+        visuals.widgets.inactive.fg_stroke =
+            egui::Stroke::new(1.5, Color32::from_rgb(220, 230, 245));
         visuals.widgets.hovered.fg_stroke = egui::Stroke::new(2.0, Color32::WHITE);
         visuals.widgets.active.fg_stroke = egui::Stroke::new(2.0, Color32::WHITE);
 
@@ -65,12 +66,36 @@ impl LinuxVrGui {
 }
 
 impl eframe::App for LinuxVrGui {
+    /// Runs even while the window is hidden in the tray, which is what makes
+    /// "Open LinuxVR GUI" work: the tray sets a flag, and this raises the
+    /// window on the next pass.
+    fn logic(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        if self.state.take_show_window() {
+            ctx.send_viewport_cmd(ViewportCommand::Visible(true));
+            ctx.send_viewport_cmd(ViewportCommand::Focus);
+        }
+
+        if self.state.is_quitting() {
+            ctx.send_viewport_cmd(ViewportCommand::Close);
+        } else if ctx.input(|i| i.viewport().close_requested()) {
+            // Closing the window used to end the process, taking the watchdog
+            // and the tray icon with it. Hide instead; quitting is done from
+            // the tray menu.
+            ctx.send_viewport_cmd(ViewportCommand::CancelClose);
+            ctx.send_viewport_cmd(ViewportCommand::Visible(false));
+            self.state
+                .add_log("Window hidden to tray. Use the tray menu to quit.");
+        }
+
+        ctx.request_repaint_after(std::time::Duration::from_millis(500));
+    }
+
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         let ctx = ui.ctx().clone();
-        Self::apply_vr_style(&ctx);
-
-        // Periodically request repaint for live status updates
-        ctx.request_repaint_after(std::time::Duration::from_millis(500));
+        if !self.style_applied {
+            Self::apply_vr_style(&ctx);
+            self.style_applied = true;
+        }
 
         // Header Panel
         egui::Frame::NONE
@@ -118,34 +143,59 @@ impl eframe::App for LinuxVrGui {
 
                 // Navigation Tabs - Large Touch Targets
                 ui.horizontal(|ui| {
-                    let tab_btn = |ui: &mut egui::Ui, text: &str, _tab: Tab, selected: bool| -> bool {
-                        let color = if selected {
-                            Color32::from_rgb(0, 180, 255)
-                        } else {
-                            Color32::from_rgb(45, 55, 75)
+                    let tab_btn =
+                        |ui: &mut egui::Ui, text: &str, _tab: Tab, selected: bool| -> bool {
+                            let color = if selected {
+                                Color32::from_rgb(0, 180, 255)
+                            } else {
+                                Color32::from_rgb(45, 55, 75)
+                            };
+                            let text_color = if selected {
+                                Color32::WHITE
+                            } else {
+                                Color32::from_rgb(180, 190, 210)
+                            };
+                            let btn = egui::Button::new(
+                                RichText::new(text)
+                                    .font(FontId::proportional(18.0))
+                                    .color(text_color)
+                                    .strong(),
+                            )
+                            .fill(color)
+                            .min_size(Vec2::new(160.0, 48.0));
+                            ui.add(btn).clicked()
                         };
-                        let text_color = if selected { Color32::WHITE } else { Color32::from_rgb(180, 190, 210) };
-                        let btn = egui::Button::new(
-                            RichText::new(text)
-                                .font(FontId::proportional(18.0))
-                                .color(text_color)
-                                .strong(),
-                        )
-                        .fill(color)
-                        .min_size(Vec2::new(160.0, 48.0));
-                        ui.add(btn).clicked()
-                    };
 
-                    if tab_btn(ui, "🏠 Dashboard", Tab::Dashboard, self.current_tab == Tab::Dashboard) {
+                    if tab_btn(
+                        ui,
+                        "🏠 Dashboard",
+                        Tab::Dashboard,
+                        self.current_tab == Tab::Dashboard,
+                    ) {
                         self.current_tab = Tab::Dashboard;
                     }
-                    if tab_btn(ui, "⚡ Autostart Rules", Tab::AutostartRules, self.current_tab == Tab::AutostartRules) {
+                    if tab_btn(
+                        ui,
+                        "⚡ Autostart Rules",
+                        Tab::AutostartRules,
+                        self.current_tab == Tab::AutostartRules,
+                    ) {
                         self.current_tab = Tab::AutostartRules;
                     }
-                    if tab_btn(ui, "🔊 Audio Switcher", Tab::AudioSettings, self.current_tab == Tab::AudioSettings) {
+                    if tab_btn(
+                        ui,
+                        "🔊 Audio Switcher",
+                        Tab::AudioSettings,
+                        self.current_tab == Tab::AudioSettings,
+                    ) {
                         self.current_tab = Tab::AudioSettings;
                     }
-                    if tab_btn(ui, "📋 Activity Logs", Tab::EventLogs, self.current_tab == Tab::EventLogs) {
+                    if tab_btn(
+                        ui,
+                        "📋 Activity Logs",
+                        Tab::EventLogs,
+                        self.current_tab == Tab::EventLogs,
+                    ) {
                         self.current_tab = Tab::EventLogs;
                     }
                 });
@@ -177,7 +227,7 @@ impl LinuxVrGui {
         .min_size(Vec2::new(ui.available_width(), 65.0));
 
         if ui.add(nuke_btn).clicked() {
-            *self.nuke_trigger.lock().unwrap() = true;
+            self.state.send(Command::Nuke);
         }
 
         ui.add_space(20.0);
@@ -190,20 +240,34 @@ impl LinuxVrGui {
                 ui.heading(RichText::new("⚙️ Service Watchdogs").font(FontId::proportional(20.0)));
                 ui.add_space(10.0);
 
-                let mut cfg = self.state.config.lock().unwrap();
+                let snapshot = self.state.config_snapshot();
 
-                let mut wivrn_auto = cfg.auto_restart_wivrn;
-                if ui.checkbox(&mut wivrn_auto, RichText::new("Auto-Restart WiVRn on Crash/Close").font(FontId::proportional(17.0))).changed() {
-                    cfg.auto_restart_wivrn = wivrn_auto;
-                    let _ = cfg.save();
+                let mut wivrn_auto = snapshot.auto_restart_wivrn;
+                if ui
+                    .checkbox(
+                        &mut wivrn_auto,
+                        RichText::new("Auto-Restart WiVRn on Crash/Close")
+                            .font(FontId::proportional(17.0)),
+                    )
+                    .changed()
+                {
+                    self.state
+                        .update_config(|cfg| cfg.auto_restart_wivrn = wivrn_auto);
                 }
 
                 ui.add_space(10.0);
 
-                let mut audio_auto = cfg.auto_switch_audio;
-                if ui.checkbox(&mut audio_auto, RichText::new("Auto-Switch Mic & Output to VR Headset").font(FontId::proportional(17.0))).changed() {
-                    cfg.auto_switch_audio = audio_auto;
-                    let _ = cfg.save();
+                let mut audio_auto = snapshot.auto_switch_audio;
+                if ui
+                    .checkbox(
+                        &mut audio_auto,
+                        RichText::new("Auto-Switch Mic & Output to VR Headset")
+                            .font(FontId::proportional(17.0)),
+                    )
+                    .changed()
+                {
+                    self.state
+                        .update_config(|cfg| cfg.auto_switch_audio = audio_auto);
                 }
             });
 
@@ -218,27 +282,55 @@ impl LinuxVrGui {
                 ui.horizontal(|ui| {
                     ui.label(RichText::new("WiVRn Service:").font(FontId::proportional(17.0)));
                     if wivrn_running {
-                        ui.label(RichText::new("RUNNING").font(FontId::proportional(17.0)).color(Color32::GREEN).strong());
+                        ui.label(
+                            RichText::new("RUNNING")
+                                .font(FontId::proportional(17.0))
+                                .color(Color32::GREEN)
+                                .strong(),
+                        );
                     } else {
-                        ui.label(RichText::new("STOPPED").font(FontId::proportional(17.0)).color(Color32::RED).strong());
+                        ui.label(
+                            RichText::new("STOPPED")
+                                .font(FontId::proportional(17.0))
+                                .color(Color32::RED)
+                                .strong(),
+                        );
                     }
                 });
 
                 ui.horizontal(|ui| {
                     ui.label(RichText::new("VRChat Process:").font(FontId::proportional(17.0)));
                     if vrchat_running {
-                        ui.label(RichText::new("RUNNING").font(FontId::proportional(17.0)).color(Color32::GREEN).strong());
+                        ui.label(
+                            RichText::new("RUNNING")
+                                .font(FontId::proportional(17.0))
+                                .color(Color32::GREEN)
+                                .strong(),
+                        );
                     } else {
-                        ui.label(RichText::new("NOT DETECTED").font(FontId::proportional(17.0)).color(Color32::GRAY));
+                        ui.label(
+                            RichText::new("NOT DETECTED")
+                                .font(FontId::proportional(17.0))
+                                .color(Color32::GRAY),
+                        );
                     }
                 });
 
                 ui.horizontal(|ui| {
                     ui.label(RichText::new("VR Audio Routing:").font(FontId::proportional(17.0)));
                     if audio_conn {
-                        ui.label(RichText::new("CONNECTED TO WIVRN").font(FontId::proportional(17.0)).color(Color32::CYAN).strong());
+                        ui.label(
+                            RichText::new("CONNECTED TO WIVRN")
+                                .font(FontId::proportional(17.0))
+                                .color(Color32::CYAN)
+                                .strong(),
+                        );
                     } else {
-                        ui.label(RichText::new("STANDARD SYSTEM AUDIO").font(FontId::proportional(17.0)).color(Color32::LIGHT_GRAY));
+                        ui.label(
+                            RichText::new("STANDARD SYSTEM AUDIO")
+                                .font(FontId::proportional(17.0))
+                                .color(Color32::LIGHT_GRAY),
+                        );
                     }
                 });
             });
@@ -247,7 +339,9 @@ impl LinuxVrGui {
 
     fn show_autostart_rules(&mut self, ui: &mut egui::Ui) {
         ui.horizontal(|ui| {
-            ui.heading(RichText::new("⚡ Autostart & Grace Period Rules").font(FontId::proportional(22.0)));
+            ui.heading(
+                RichText::new("⚡ Autostart & Grace Period Rules").font(FontId::proportional(22.0)),
+            );
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 let add_btn = egui::Button::new(
                     RichText::new("➕ Add New Rule")
@@ -262,17 +356,16 @@ impl LinuxVrGui {
                 }
 
                 let reset_btn = egui::Button::new(
-                    RichText::new("🔄 Reset Defaults")
-                        .font(FontId::proportional(16.0)),
+                    RichText::new("🔄 Reset Defaults").font(FontId::proportional(16.0)),
                 )
                 .fill(Color32::from_rgb(80, 90, 110))
                 .min_size(Vec2::new(140.0, 40.0));
 
                 if ui.add(reset_btn).clicked() {
-                    let mut cfg = self.state.config.lock().unwrap();
-                    *cfg = crate::config::Config::default();
-                    let _ = cfg.save();
-                    self.state.add_log("Reset autostart rules to default configuration.");
+                    self.state
+                        .update_config(|cfg| *cfg = crate::config::Config::default());
+                    self.state
+                        .add_log("Reset autostart rules to default configuration.");
                 }
             });
         });
@@ -282,7 +375,9 @@ impl LinuxVrGui {
         // Add Rule Form Modal / Inline
         if self.show_add_modal {
             ui.group(|ui| {
-                ui.heading(RichText::new("Create New Autostart Rule").font(FontId::proportional(18.0)));
+                ui.heading(
+                    RichText::new("Create New Autostart Rule").font(FontId::proportional(18.0)),
+                );
                 ui.horizontal(|ui| {
                     ui.label("Name:");
                     ui.text_edit_singleline(&mut self.new_rule_name);
@@ -290,9 +385,21 @@ impl LinuxVrGui {
                     egui::ComboBox::from_id_salt("trigger_combo")
                         .selected_text(self.new_rule_trigger.to_string())
                         .show_ui(ui, |ui| {
-                            ui.selectable_value(&mut self.new_rule_trigger, TriggerType::VRChat, "VRChat");
-                            ui.selectable_value(&mut self.new_rule_trigger, TriggerType::WiVRn, "WiVRn");
-                            ui.selectable_value(&mut self.new_rule_trigger, TriggerType::Always, "Always");
+                            ui.selectable_value(
+                                &mut self.new_rule_trigger,
+                                TriggerType::VRChat,
+                                "VRChat",
+                            );
+                            ui.selectable_value(
+                                &mut self.new_rule_trigger,
+                                TriggerType::WiVRn,
+                                "WiVRn",
+                            );
+                            ui.selectable_value(
+                                &mut self.new_rule_trigger,
+                                TriggerType::Always,
+                                "Always",
+                            );
                         });
                 });
                 ui.horizontal(|ui| {
@@ -325,9 +432,8 @@ impl LinuxVrGui {
                                 .filter(|p| !p.is_empty())
                                 .collect(),
                         };
-                        let mut cfg = self.state.config.lock().unwrap();
-                        cfg.autostart_rules.push(rule);
-                        let _ = cfg.save();
+                        self.state
+                            .update_config(|cfg| cfg.autostart_rules.push(rule));
                         self.new_rule_name.clear();
                         self.new_rule_cmd.clear();
                         self.new_rule_patterns.clear();
@@ -341,18 +447,26 @@ impl LinuxVrGui {
             ui.add_space(10.0);
         }
 
-        // Rules List Table
-        egui::ScrollArea::vertical().show(ui, |ui| {
-            let mut cfg = self.state.config.lock().unwrap();
-            let mut delete_id: Option<String> = None;
-            let mut run_cmd: Option<String> = None;
+        // Rules List Table.
+        //
+        // Rendered from a snapshot: the config mutex is only taken to apply the
+        // edits the user actually made, and never while `Config::save` writes
+        // to disk.
+        let rules = self.state.config_snapshot().autostart_rules;
+        let mut delete_id: Option<String> = None;
+        let mut run_cmd: Option<String> = None;
+        let mut toggled: Option<(String, bool)> = None;
 
-            for rule in cfg.autostart_rules.iter_mut() {
+        egui::ScrollArea::vertical().show(ui, |ui| {
+            for rule in &rules {
                 ui.group(|ui| {
                     ui.horizontal(|ui| {
                         let mut enabled = rule.enabled;
                         if ui.checkbox(&mut enabled, "").changed() {
-                            rule.enabled = enabled;
+                            // This used to write straight into the locked
+                            // config without saving, so the toggle was lost on
+                            // the next restart.
+                            toggled = Some((rule.id.clone(), enabled));
                         }
 
                         ui.label(
@@ -367,7 +481,7 @@ impl LinuxVrGui {
                                 .color(Color32::from_rgb(0, 200, 255)),
                         );
 
-                        let grace_str = if rule.grace_period_secs < 0 {
+                        let grace_str = if rule.keeps_running() {
                             "Keep Running (-1)".to_string()
                         } else {
                             format!("Grace: {}s", rule.grace_period_secs)
@@ -379,7 +493,10 @@ impl LinuxVrGui {
                         );
 
                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                            if ui.button(RichText::new("🗑 Delete").color(Color32::LIGHT_RED)).clicked() {
+                            if ui
+                                .button(RichText::new("🗑 Delete").color(Color32::LIGHT_RED))
+                                .clicked()
+                            {
                                 delete_id = Some(rule.id.clone());
                             }
                             if ui.button("▶ Run Now").clicked() {
@@ -393,28 +510,55 @@ impl LinuxVrGui {
                             .font(FontId::monospace(14.0))
                             .color(Color32::GRAY),
                     );
+                    ui.label(
+                        RichText::new(format!("Matches: {}", rule.effective_patterns().join(", ")))
+                            .font(FontId::monospace(13.0))
+                            .color(Color32::from_rgb(120, 130, 150)),
+                    );
                 });
                 ui.add_space(6.0);
             }
-
-            if let Some(id) = delete_id {
-                cfg.autostart_rules.retain(|r| r.id != id);
-                let _ = cfg.save();
-            }
-
-            if let Some(cmd) = run_cmd {
-                self.state.add_log(format!("Manual trigger exec: {}", cmd));
-                let _ = std::process::Command::new("sh").args(["-c", &cmd]).spawn();
-            }
         });
+
+        if let Some((id, enabled)) = toggled {
+            self.state.update_config(|cfg| {
+                if let Some(rule) = cfg.autostart_rules.iter_mut().find(|r| r.id == id) {
+                    rule.enabled = enabled;
+                }
+            });
+            self.state.send(Command::Poke);
+        }
+
+        if let Some(id) = delete_id {
+            self.state
+                .update_config(|cfg| cfg.autostart_rules.retain(|r| r.id != id));
+        }
+
+        if let Some(cmd) = run_cmd {
+            self.state.add_log(format!("Manual trigger exec: {}", cmd));
+            match std::process::Command::new("sh").args(["-c", &cmd]).spawn() {
+                // Reap off-thread; the old code dropped the handle and left a
+                // zombie behind on every click.
+                Ok(mut child) => {
+                    std::thread::spawn(move || {
+                        let _ = child.wait();
+                    });
+                }
+                Err(e) => self.state.add_log(format!("Failed to run: {}", e)),
+            }
+        }
     }
 
     fn show_audio_settings(&mut self, ui: &mut egui::Ui) {
-        ui.heading(RichText::new("🔊 Audio Output & Microphone Router").font(FontId::proportional(22.0)));
+        ui.heading(
+            RichText::new("🔊 Audio Output & Microphone Router").font(FontId::proportional(22.0)),
+        );
         ui.add_space(10.0);
 
-        let default_sink = crate::audio::AudioSwitcher::get_default_sink().unwrap_or_else(|| "Unknown".to_string());
-        let default_source = crate::audio::AudioSwitcher::get_default_source().unwrap_or_else(|| "Unknown".to_string());
+        let default_sink = crate::audio::AudioSwitcher::get_default_sink()
+            .unwrap_or_else(|| "Unknown".to_string());
+        let default_source = crate::audio::AudioSwitcher::get_default_source()
+            .unwrap_or_else(|| "Unknown".to_string());
         let (wivrn_sink, wivrn_source) = crate::audio::AudioSwitcher::is_wivrn_audio_available();
 
         ui.group(|ui| {
@@ -423,8 +567,18 @@ impl LinuxVrGui {
             ui.label(format!("Default Output Sink: {}", default_sink));
             ui.label(format!("Default Microphone Source: {}", default_source));
             ui.add_space(8.0);
-            ui.label(format!("WiVRn Sink Node Available: {}", if wivrn_sink { "Yes (wivrn.sink)" } else { "No" }));
-            ui.label(format!("WiVRn Source Node Available: {}", if wivrn_source { "Yes (wivrn.source)" } else { "No" }));
+            ui.label(format!(
+                "WiVRn Sink Node Available: {}",
+                if wivrn_sink { "Yes (wivrn.sink)" } else { "No" }
+            ));
+            ui.label(format!(
+                "WiVRn Source Node Available: {}",
+                if wivrn_source {
+                    "Yes (wivrn.source)"
+                } else {
+                    "No"
+                }
+            ));
         });
 
         ui.add_space(15.0);
@@ -445,12 +599,12 @@ impl LinuxVrGui {
                 if wivrn_source {
                     crate::audio::AudioSwitcher::set_default_source("wivrn.source");
                 }
-                self.state.add_log("Manually switched audio output and mic to WiVRn");
+                self.state
+                    .add_log("Manually switched audio output and mic to WiVRn");
             }
 
             let restore_btn = egui::Button::new(
-                RichText::new("🔊 Restore Standard System Audio")
-                    .font(FontId::proportional(18.0)),
+                RichText::new("🔊 Restore Standard System Audio").font(FontId::proportional(18.0)),
             )
             .fill(Color32::from_rgb(70, 80, 100))
             .min_size(Vec2::new(260.0, 50.0));
@@ -462,7 +616,8 @@ impl LinuxVrGui {
                     .unwrap()
                     .restore_previous_audio();
                 *self.state.wivrn_audio_connected.lock().unwrap() = false;
-                self.state.add_log("Manually restored system default audio devices.");
+                self.state
+                    .add_log("Manually restored system default audio devices.");
             }
         });
     }

@@ -17,11 +17,19 @@ fn test_default_config() {
     assert_eq!(vrc_video_cacher.grace_period_secs, 120);
     assert_eq!(vrc_video_cacher.trigger, TriggerType::VRChat);
 
-    let vrcx = cfg.autostart_rules.iter().find(|r| r.id == "vrcx-0").unwrap();
+    let vrcx = cfg
+        .autostart_rules
+        .iter()
+        .find(|r| r.id == "vrcx-0")
+        .unwrap();
     assert_eq!(vrcx.grace_period_secs, -1);
     assert_eq!(vrcx.trigger, TriggerType::VRChat);
 
-    let slimevr = cfg.autostart_rules.iter().find(|r| r.id == "slimevr").unwrap();
+    let slimevr = cfg
+        .autostart_rules
+        .iter()
+        .find(|r| r.id == "slimevr")
+        .unwrap();
     assert_eq!(slimevr.grace_period_secs, 300);
     assert_eq!(slimevr.trigger, TriggerType::WiVRn);
 }
@@ -32,7 +40,10 @@ fn test_config_serialization() {
     let json = serde_json::to_string(&cfg).expect("Serialization failed");
     let deserialized: Config = serde_json::from_str(&json).expect("Deserialization failed");
     assert_eq!(cfg.auto_restart_wivrn, deserialized.auto_restart_wivrn);
-    assert_eq!(cfg.autostart_rules.len(), deserialized.autostart_rules.len());
+    assert_eq!(
+        cfg.autostart_rules.len(),
+        deserialized.autostart_rules.len()
+    );
 }
 
 /// The switcher's bookkeeping, without touching the machine's audio.
@@ -53,7 +64,10 @@ fn test_audio_switcher_state_machine() {
         current_state: AudioState::ConnectedToWiVRn,
     };
     assert_eq!(connected.current_state, AudioState::ConnectedToWiVRn);
-    assert_eq!(connected.previous_sink.as_deref(), Some("alsa_output.example"));
+    assert_eq!(
+        connected.previous_sink.as_deref(),
+        Some("alsa_output.example")
+    );
 }
 
 /// Every default rule must recognise the process it launches.
@@ -85,7 +99,10 @@ fn test_rules_match_their_real_world_processes() {
 
     // Command lines as they actually appear in `ps` on the target machine.
     let cases = [
-        ("vrcx-0", "vrcx-0 /var/home/blu/appimages/vrcx0.appimage --autostart"),
+        (
+            "vrcx-0",
+            "vrcx-0 /var/home/blu/appimages/vrcx0.appimage --autostart",
+        ),
         (
             "vrcx-extras",
             "start.sh /bin/bash /run/media/system/data/projects/vrcx-extras/start.sh",
