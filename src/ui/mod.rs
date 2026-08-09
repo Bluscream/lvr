@@ -273,13 +273,12 @@ impl LvrApp {
                             ui.label(RichText::new(error).color(widgets::RED).size(14.0));
                             ui.add_space(4.0);
                         }
-                        ui.horizontal(|ui| {
-                            let width = ((ui.available_width() - 12.0) / 2.0).max(120.0);
-                            if widgets::big_button(ui, "Save", Some(widgets::GREEN), width).clicked() {
-                                *close_and_save = true;
-                            }
-                            if widgets::big_button(ui, "Cancel", None, width).clicked() {
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            if widgets::row_button(ui, "Cancel", None, 90.0).clicked() {
                                 *cancel = true;
+                            }
+                            if widgets::row_button(ui, "Save", Some(widgets::GREEN), 90.0).clicked() {
+                                *close_and_save = true;
                             }
                         });
                         ui.add_space(6.0);
