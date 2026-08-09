@@ -89,10 +89,9 @@ pub fn parse_devices(listing: &str) -> Vec<AudioDevice> {
     let mut current: Option<AudioDevice> = None;
 
     for line in listing.lines() {
-        let depth = line.len() - line.trim_start().len();
         let trimmed = line.trim();
 
-        if depth == 0 && (trimmed.starts_with("Sink #") || trimmed.starts_with("Source #")) {
+        if trimmed.starts_with("Sink #") || trimmed.starts_with("Source #") {
             if let Some(device) = current.take()
                 && !device.name.is_empty()
             {
@@ -101,17 +100,18 @@ pub fn parse_devices(listing: &str) -> Vec<AudioDevice> {
             current = Some(AudioDevice::default());
             continue;
         }
-        // Top-level fields of a block are indented exactly one tab.
-        if depth != 1 {
-            continue;
-        }
         let Some(device) = current.as_mut() else {
             continue;
         };
-        if let Some(rest) = trimmed.strip_prefix("Name: ") {
-            device.name = rest.trim().to_string();
-        } else if let Some(rest) = trimmed.strip_prefix("Description: ") {
-            device.description = rest.trim().to_string();
+        if device.name.is_empty() {
+            if let Some(rest) = trimmed.strip_prefix("Name: ") {
+                device.name = rest.trim().to_string();
+            }
+        }
+        if device.description.is_empty() {
+            if let Some(rest) = trimmed.strip_prefix("Description: ") {
+                device.description = rest.trim().to_string();
+            }
         }
     }
     if let Some(device) = current
