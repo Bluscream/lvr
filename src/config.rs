@@ -462,7 +462,7 @@ fn default_entries() -> Vec<AutostartEntry> {
             enabled: true,
             trigger: Trigger::Vrchat,
             command: "/run/media/system/Data/Projects/vrcx-extras/start.sh".into(),
-            match_patterns: vec!["vrcx-extras".into()],
+            match_patterns: vec!["vrcx-extras".into(), "server.ts".into()],
             grace_secs: -1,
             ..Default::default()
         },

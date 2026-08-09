@@ -353,6 +353,7 @@ impl Engine {
             {
                 pids.push(pid);
             }
+            snapshot.expand_children(&mut pids, &[]);
             let running = !pids.is_empty();
             let trigger_active =
                 Self::trigger_active(&entry.trigger, snapshot, wivrn, vrchat_running);
@@ -443,6 +444,7 @@ impl Engine {
         {
             pids.push(pid);
         }
+        snapshot.expand_children(&mut pids, &[]);
 
         if pids.is_empty() {
             self.children.forget(&entry.id);
@@ -1170,6 +1172,7 @@ mod tests {
         let snapshot = ProcSnapshot {
             procs: vec![crate::procs::ProcInfo {
                 pid: 5,
+                ppid: None,
                 haystack: "some-daemon --run".into(),
             }],
         };

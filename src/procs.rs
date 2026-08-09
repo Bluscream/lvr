@@ -14,6 +14,7 @@ use crate::config::AutostartEntry;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ProcInfo {
     pub pid: u32,
+    pub ppid: Option<u32>,
     /// Executable name plus full command line, lowercased, for substring matching.
     pub haystack: String,
 }
@@ -41,6 +42,25 @@ impl ProcSnapshot {
 
     pub fn any_matching(&self, patterns: &[String], exclude: &[u32]) -> bool {
         !self.matching(patterns, exclude).is_empty()
+    }
+
+    /// Recursively append all processes whose parent or ancestor is in `pids`.
+    pub fn expand_children(&self, pids: &mut Vec<u32>, exclude: &[u32]) {
+        let mut added = true;
+        while added {
+            added = false;
+            for p in &self.procs {
+                if exclude.contains(&p.pid) || pids.contains(&p.pid) {
+                    continue;
+                }
+                if let Some(ppid) = p.ppid {
+                    if pids.contains(&ppid) {
+                        pids.push(p.pid);
+                        added = true;
+                    }
+                }
+            }
+        }
     }
 }
 
@@ -91,6 +111,7 @@ impl ProcessScanner {
                 }
                 ProcInfo {
                     pid: pid.as_u32(),
+                    ppid: proc.parent().map(|p| p.as_u32()),
                     haystack,
                 }
             })
@@ -405,18 +426,34 @@ mod tests {
             procs: vec![
                 ProcInfo {
                     pid: 10,
+                    ppid: None,
                     haystack: "vrchat.exe z:\\games\\vrchat\\vrchat.exe --no-vr".into(),
                 },
                 ProcInfo {
                     pid: 11,
+                    ppid: None,
                     haystack: "slimevr /app/main/slimevr".into(),
                 },
                 ProcInfo {
                     pid: 12,
+                    ppid: None,
                     haystack: "bash /home/blu/.local/bin/vrcosc".into(),
+                },
+                ProcInfo {
+                    pid: 13,
+                    ppid: Some(12),
+                    haystack: "node --disable-warning=experimentalwarning server.ts".into(),
                 },
             ],
         }
+    }
+
+    #[test]
+    fn expand_children_finds_child_processes() {
+        let snap = snapshot();
+        let mut pids = vec![12];
+        snap.expand_children(&mut pids, &[]);
+        assert_eq!(pids, vec![12, 13]);
     }
 
     #[test]
