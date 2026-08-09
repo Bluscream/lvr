@@ -247,37 +247,62 @@ impl LvrApp {
         let Some(editor) = self.editor.as_mut() else {
             return;
         };
+        let title = if editor.is_new {
+            "New autostart entry"
+        } else {
+            "Edit autostart entry"
+        };
+
+        let viewport_id = egui::ViewportId::from_hash_of("entry_editor_viewport");
+        let builder = egui::ViewportBuilder::default()
+            .with_title(title)
+            .with_inner_size([600.0, 640.0])
+            .with_min_inner_size([480.0, 400.0])
+            .with_resizable(true);
+
         let mut open = true;
         let mut close_and_save = false;
         let mut cancel = false;
 
-        egui::Window::new(if editor.is_new {
-            "New autostart entry"
-        } else {
-            "Edit autostart entry"
-        })
-        .open(&mut open)
-        .collapsible(false)
-        .resizable(true)
-        .default_width(560.0)
-        .show(ctx, |ui| {
-            egui::ScrollArea::vertical()
-                .max_height(520.0)
-                .show(ui, |ui| {
-                    autostart::editor_body(ui, editor);
+        ctx.show_viewport_immediate(viewport_id, builder, |ctx, class| {
+            let render_content = |ui: &mut egui::Ui, editor: &mut EntryEditor, close_and_save: &mut bool, cancel: &mut bool| {
+                egui::ScrollArea::vertical()
+                    .auto_shrink([false, false])
+                    .show(ui, |ui| {
+                        autostart::editor_body(ui, editor);
+                    });
+                ui.separator();
+                if let Some(error) = &editor.error {
+                    ui.label(RichText::new(error).color(widgets::RED).size(15.0));
+                }
+                ui.add_space(6.0);
+                ui.horizontal(|ui| {
+                    if widgets::big_button(ui, "Save", Some(widgets::GREEN), 160.0).clicked() {
+                        *close_and_save = true;
+                    }
+                    if widgets::big_button(ui, "Cancel", None, 160.0).clicked() {
+                        *cancel = true;
+                    }
                 });
-            ui.separator();
-            if let Some(error) = &editor.error {
-                ui.label(RichText::new(error).color(widgets::RED).size(15.0));
+            };
+
+            if class == egui::ViewportClass::Root {
+                egui::Window::new(title)
+                    .open(&mut open)
+                    .collapsible(false)
+                    .resizable(true)
+                    .default_size([600.0, 640.0])
+                    .show(ctx, |ui| {
+                        render_content(ui, editor, &mut close_and_save, &mut cancel);
+                    });
+            } else {
+                egui::CentralPanel::default().show(ctx, |ui| {
+                    render_content(ui, editor, &mut close_and_save, &mut cancel);
+                });
+                if ctx.input(|i| i.viewport().close_requested()) {
+                    open = false;
+                }
             }
-            ui.horizontal(|ui| {
-                if widgets::big_button(ui, "Save", Some(widgets::GREEN), 160.0).clicked() {
-                    close_and_save = true;
-                }
-                if widgets::big_button(ui, "Cancel", None, 160.0).clicked() {
-                    cancel = true;
-                }
-            });
         });
 
         if close_and_save {
