@@ -1,0 +1,30 @@
+[Desktop Entry]
+Type=Application
+Name=LinuxVR
+GenericName=VR session companion
+Comment=Keeps WiVRn alive, switches audio with the headset and manages VR companion apps
+Exec=lvr
+Icon=lvr
+Terminal=false
+Categories=Utility;
+Keywords=VR;WiVRn;OpenXR;VRChat;SteamVR;
+StartupNotify=false
+StartupWMClass=lvr
+SingleMainWindow=true
+Actions=Dashboard;Logs;AudioVR;AudioDesktop;
+
+[Desktop Action Dashboard]
+Name=Open dashboard
+Exec=lvr --show --tab dashboard
+
+[Desktop Action Logs]
+Name=Open logs
+Exec=lvr --show --tab logs
+
+[Desktop Action AudioVR]
+Name=Route audio to VR
+Exec=lvr --audio vr
+
+[Desktop Action AudioDesktop]
+Name=Route audio to desktop
+Exec=lvr --audio desktop
