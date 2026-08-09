@@ -266,23 +266,29 @@ impl LvrApp {
 
         ctx.show_viewport_immediate(viewport_id, builder, |ctx, class| {
             let render_content = |ui: &mut egui::Ui, editor: &mut EntryEditor, close_and_save: &mut bool, cancel: &mut bool| {
-                egui::ScrollArea::vertical()
-                    .auto_shrink([false, false])
-                    .show(ui, |ui| {
+                egui::Panel::bottom("editor_footer")
+                    .show_inside(ui, |ui| {
+                        ui.add_space(6.0);
+                        if let Some(error) = &editor.error {
+                            ui.label(RichText::new(error).color(widgets::RED).size(14.0));
+                            ui.add_space(4.0);
+                        }
+                        ui.horizontal(|ui| {
+                            let width = ((ui.available_width() - 12.0) / 2.0).max(120.0);
+                            if widgets::big_button(ui, "Save", Some(widgets::GREEN), width).clicked() {
+                                *close_and_save = true;
+                            }
+                            if widgets::big_button(ui, "Cancel", None, width).clicked() {
+                                *cancel = true;
+                            }
+                        });
+                        ui.add_space(6.0);
+                    });
+
+                egui::CentralPanel::default().show(ui, |ui| {
+                    egui::ScrollArea::vertical().show(ui, |ui| {
                         autostart::editor_body(ui, editor);
                     });
-                ui.separator();
-                if let Some(error) = &editor.error {
-                    ui.label(RichText::new(error).color(widgets::RED).size(15.0));
-                }
-                ui.add_space(6.0);
-                ui.horizontal(|ui| {
-                    if widgets::big_button(ui, "Save", Some(widgets::GREEN), 160.0).clicked() {
-                        *close_and_save = true;
-                    }
-                    if widgets::big_button(ui, "Cancel", None, 160.0).clicked() {
-                        *cancel = true;
-                    }
                 });
             };
 
