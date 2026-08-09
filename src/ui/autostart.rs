@@ -8,14 +8,14 @@ use super::{EntryEditor, GraceMode, LvrApp};
 use crate::config::{AutostartEntry, Trigger};
 use crate::state::Command;
 
-const ON_WIDTH: f32 = 32.0;
-const NAME_WIDTH: f32 = 110.0;
-const TRIGGER_WIDTH: f32 = 120.0;
-const STOPS_WIDTH: f32 = 95.0;
+const ON_WIDTH: f32 = 30.0;
+const NAME_WIDTH: f32 = 100.0;
+const TRIGGER_WIDTH: f32 = 110.0;
+const STOPS_WIDTH: f32 = 85.0;
 /// Status never shrinks below this; past that point the table scrolls instead.
 const MIN_STATUS_WIDTH: f32 = 80.0;
-/// Slack for the cell's own padding and the scrollbar.
-const CELL_PADDING: f32 = 12.0;
+/// Slack for table cell margins, padding, and window scrollbar.
+const CELL_PADDING: f32 = 36.0;
 const STATUS_TEXT_SIZE: f32 = 11.0;
 /// Room for the status dot that sits left of the wrapped text.
 const STATUS_DOT_WIDTH: f32 = 20.0;
@@ -23,7 +23,7 @@ const STATUS_DOT_WIDTH: f32 = 20.0;
 const MIN_ROW_HEIGHT: f32 = 36.0;
 
 /// Compact widths of the action buttons, in the order they are drawn.
-const ACTION_BUTTON_WIDTHS: [f32; 5] = [54.0, 44.0, 30.0, 42.0, 58.0];
+const ACTION_BUTTON_WIDTHS: [f32; 5] = [52.0, 42.0, 28.0, 38.0, 54.0];
 
 /// Exact width the action column needs for every button plus the gaps.
 fn actions_column_width(item_spacing: f32) -> f32 {
@@ -179,13 +179,13 @@ pub fn show(app: &mut LvrApp, ui: &mut Ui) {
                     });
                     row.col(|ui| {
                         if status.running {
-                            if widgets::compact_button(ui, "Stop", Some(ORANGE), 54.0).clicked() {
+                            if widgets::compact_button(ui, "Stop", Some(ORANGE), 52.0).clicked() {
                                 pending = Some(Pending::Stop(entry.id.clone()));
                             }
-                        } else if widgets::compact_button(ui, "Start", Some(GREEN), 54.0).clicked() {
+                        } else if widgets::compact_button(ui, "Start", Some(GREEN), 52.0).clicked() {
                             pending = Some(Pending::Start(entry.id.clone()));
                         }
-                        if widgets::compact_button(ui, "Edit", None, 44.0).clicked() {
+                        if widgets::compact_button(ui, "Edit", None, 42.0).clicked() {
                             pending = Some(Pending::Edit(entry.id.clone()));
                         }
                         if ui
@@ -193,7 +193,7 @@ pub fn show(app: &mut LvrApp, ui: &mut Ui) {
                                 index > 0,
                                 egui::Button::new(RichText::new("Up").size(11.0))
                                     .corner_radius(egui::CornerRadius::same(4))
-                                    .min_size(egui::vec2(30.0, 17.0)),
+                                    .min_size(egui::vec2(28.0, 17.0)),
                             )
                             .clicked()
                         {
@@ -204,13 +204,13 @@ pub fn show(app: &mut LvrApp, ui: &mut Ui) {
                                 index + 1 < entries.len(),
                                 egui::Button::new(RichText::new("Down").size(11.0))
                                     .corner_radius(egui::CornerRadius::same(4))
-                                    .min_size(egui::vec2(42.0, 17.0)),
+                                    .min_size(egui::vec2(38.0, 17.0)),
                             )
                             .clicked()
                         {
                             pending = Some(Pending::MoveDown(index));
                         }
-                        if widgets::compact_button(ui, "Delete", Some(RED), 58.0).clicked() {
+                        if widgets::compact_button(ui, "Delete", Some(RED), 54.0).clicked() {
                             pending = Some(Pending::Delete(entry.id.clone()));
                         }
                     });
@@ -441,7 +441,7 @@ mod tests {
             width >= needed,
             "action column {width} cannot hold {needed} of buttons"
         );
-        assert_eq!(width, 268.0);
+        assert_eq!(width, 254.0);
     }
 
     #[test]
