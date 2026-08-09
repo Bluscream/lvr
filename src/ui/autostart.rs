@@ -8,6 +8,44 @@ use super::{EntryEditor, GraceMode, LvrApp};
 use crate::config::{AutostartEntry, Trigger};
 use crate::state::Command;
 
+const ON_WIDTH: f32 = 46.0;
+const NAME_WIDTH: f32 = 190.0;
+const TRIGGER_WIDTH: f32 = 170.0;
+const STOPS_WIDTH: f32 = 130.0;
+/// Status never shrinks below this; past that point the table scrolls instead.
+const MIN_STATUS_WIDTH: f32 = 110.0;
+/// Slack for the cell's own padding and the scrollbar.
+const CELL_PADDING: f32 = 24.0;
+const STATUS_TEXT_SIZE: f32 = 12.0;
+/// Room for the status dot that sits left of the wrapped text.
+const STATUS_DOT_WIDTH: f32 = 26.0;
+/// Two lines of name plus padding: the floor for any row.
+const MIN_ROW_HEIGHT: f32 = 52.0;
+
+/// Widths of the action buttons, in the order they are drawn. The column is
+/// sized from these so a button can never be pushed off the window edge — which
+/// is exactly what a hard-coded column width used to do to "Delete".
+const ACTION_BUTTON_WIDTHS: [f32; 5] = [74.0, 74.0, 44.0, 54.0, 82.0];
+
+/// Exact width the action column needs for every button plus the gaps.
+fn actions_column_width(item_spacing: f32) -> f32 {
+    let buttons: f32 = ACTION_BUTTON_WIDTHS.iter().sum();
+    let gaps = item_spacing * (ACTION_BUTTON_WIDTHS.len() - 1) as f32;
+    buttons + gaps
+}
+
+/// How tall a row must be for its status text to fit at `status_width`.
+fn row_height(ui: &egui::Ui, status_text: &str, status_width: f32) -> f32 {
+    let wrap_width = (status_width - STATUS_DOT_WIDTH).max(40.0);
+    let galley = ui.painter().layout(
+        status_text.to_owned(),
+        egui::FontId::proportional(STATUS_TEXT_SIZE),
+        egui::Color32::PLACEHOLDER,
+        wrap_width,
+    );
+    (galley.size().y + 14.0).max(MIN_ROW_HEIGHT)
+}
+
 /// Pending structural change, applied after the table is drawn so we never
 /// mutate the list we are iterating.
 enum Pending {
@@ -55,15 +93,36 @@ pub fn show(app: &mut LvrApp, ui: &mut Ui) {
 
     let mut pending: Option<Pending> = None;
 
+    let spacing = ui.spacing().item_spacing.x;
+    let actions_width = actions_column_width(spacing);
+    // Everything except Status is fixed, so Status is what has to give: it
+    // takes the leftover width and wraps onto as many lines as it needs, and
+    // the row grows to match. That keeps the action buttons on screen no
+    // matter how long a pid list gets.
+    let status_width = (ui.available_width()
+        - (ON_WIDTH + NAME_WIDTH + TRIGGER_WIDTH + STOPS_WIDTH + actions_width)
+        - spacing * 5.0
+        - CELL_PADDING)
+        .max(MIN_STATUS_WIDTH);
+
+    let row_heights: Vec<f32> = entries
+        .iter()
+        .map(|entry| {
+            let status = app.status.entry(&entry.id).cloned().unwrap_or_default();
+            let text = super::dashboard::detail_line(&status);
+            row_height(ui, &text, status_width)
+        })
+        .collect();
+
     TableBuilder::new(ui)
         .striped(true)
         .cell_layout(egui::Layout::left_to_right(egui::Align::Center))
-        .column(Column::exact(46.0))
-        .column(Column::initial(190.0).at_least(120.0))
-        .column(Column::initial(170.0).at_least(120.0))
-        .column(Column::initial(130.0).at_least(90.0))
-        .column(Column::remainder().at_least(160.0))
-        .column(Column::exact(330.0))
+        .column(Column::exact(ON_WIDTH))
+        .column(Column::exact(NAME_WIDTH))
+        .column(Column::exact(TRIGGER_WIDTH))
+        .column(Column::exact(STOPS_WIDTH))
+        .column(Column::remainder().at_least(MIN_STATUS_WIDTH))
+        .column(Column::exact(actions_width))
         .header(28.0, |mut header| {
             for title in ["On", "Name", "Trigger", "Stops", "Status", ""] {
                 header.col(|ui| {
@@ -74,7 +133,7 @@ pub fn show(app: &mut LvrApp, ui: &mut Ui) {
         .body(|mut body| {
             for (index, entry) in entries.iter().enumerate() {
                 let status = app.status.entry(&entry.id).cloned().unwrap_or_default();
-                body.row(52.0, |mut row| {
+                body.row(row_heights[index], |mut row| {
                     row.col(|ui| {
                         let mut enabled = entry.enabled;
                         if ui.add(egui::Checkbox::without_text(&mut enabled)).changed() {
@@ -106,12 +165,18 @@ pub fn show(app: &mut LvrApp, ui: &mut Ui) {
                     });
                     row.col(|ui| {
                         let color = widgets::on_off(status.running);
-                        ui.label(RichText::new("⏺").size(16.0).color(color));
-                        ui.label(
-                            RichText::new(super::dashboard::detail_line(&status))
-                                .size(12.0)
-                                .color(GREY),
-                        );
+                        ui.set_max_width(status_width);
+                        ui.horizontal_top(|ui| {
+                            ui.label(RichText::new("⏺").size(16.0).color(color));
+                            ui.add(
+                                egui::Label::new(
+                                    RichText::new(super::dashboard::detail_line(&status))
+                                        .size(STATUS_TEXT_SIZE)
+                                        .color(GREY),
+                                )
+                                .wrap_mode(egui::TextWrapMode::Wrap),
+                            );
+                        });
                     });
                     row.col(|ui| {
                         if status.running {
@@ -348,6 +413,7 @@ pub fn editor_body(ui: &mut Ui, editor: &mut EntryEditor) {
 
 #[cfg(test)]
 mod tests {
+    use super::{ACTION_BUTTON_WIDTHS, actions_column_width};
     use crate::config::Config;
     use crate::state::Shared;
     use std::path::PathBuf;
@@ -358,6 +424,26 @@ mod tests {
             PathBuf::from("/tmp/lvr-autostart-test.toml"),
         )
         .0
+    }
+
+    #[test]
+    fn the_action_column_is_wide_enough_for_every_button() {
+        // The regression this replaces: the column was a hard-coded 330.0 while
+        // the buttons needed 368.0, so "Delete" was clipped off the window edge.
+        let spacing = 10.0;
+        let width = actions_column_width(spacing);
+        let needed: f32 = ACTION_BUTTON_WIDTHS.iter().sum::<f32>()
+            + spacing * (ACTION_BUTTON_WIDTHS.len() - 1) as f32;
+        assert!(
+            width >= needed,
+            "action column {width} cannot hold {needed} of buttons"
+        );
+        assert_eq!(width, 368.0);
+    }
+
+    #[test]
+    fn a_wider_gap_between_buttons_widens_the_column() {
+        assert!(actions_column_width(20.0) > actions_column_width(10.0));
     }
 
     #[test]
