@@ -8,24 +8,22 @@ use super::{EntryEditor, GraceMode, LvrApp};
 use crate::config::{AutostartEntry, Trigger};
 use crate::state::Command;
 
-const ON_WIDTH: f32 = 46.0;
-const NAME_WIDTH: f32 = 190.0;
-const TRIGGER_WIDTH: f32 = 170.0;
-const STOPS_WIDTH: f32 = 130.0;
+const ON_WIDTH: f32 = 36.0;
+const NAME_WIDTH: f32 = 150.0;
+const TRIGGER_WIDTH: f32 = 140.0;
+const STOPS_WIDTH: f32 = 110.0;
 /// Status never shrinks below this; past that point the table scrolls instead.
-const MIN_STATUS_WIDTH: f32 = 110.0;
+const MIN_STATUS_WIDTH: f32 = 90.0;
 /// Slack for the cell's own padding and the scrollbar.
-const CELL_PADDING: f32 = 24.0;
-const STATUS_TEXT_SIZE: f32 = 12.0;
+const CELL_PADDING: f32 = 16.0;
+const STATUS_TEXT_SIZE: f32 = 11.0;
 /// Room for the status dot that sits left of the wrapped text.
-const STATUS_DOT_WIDTH: f32 = 26.0;
-/// Two lines of name plus padding: the floor for any row.
-const MIN_ROW_HEIGHT: f32 = 52.0;
+const STATUS_DOT_WIDTH: f32 = 20.0;
+/// Floor for any row in compact mode.
+const MIN_ROW_HEIGHT: f32 = 34.0;
 
-/// Widths of the action buttons, in the order they are drawn. The column is
-/// sized from these so a button can never be pushed off the window edge — which
-/// is exactly what a hard-coded column width used to do to "Delete".
-const ACTION_BUTTON_WIDTHS: [f32; 5] = [74.0, 74.0, 44.0, 54.0, 82.0];
+/// Compact widths of the action buttons, in the order they are drawn.
+const ACTION_BUTTON_WIDTHS: [f32; 5] = [54.0, 50.0, 34.0, 44.0, 60.0];
 
 /// Exact width the action column needs for every button plus the gaps.
 fn actions_column_width(item_spacing: f32) -> f32 {
@@ -43,7 +41,7 @@ fn row_height(ui: &egui::Ui, status_text: &str, status_width: f32) -> f32 {
         egui::Color32::PLACEHOLDER,
         wrap_width,
     );
-    (galley.size().y + 14.0).max(MIN_ROW_HEIGHT)
+    (galley.size().y + 8.0).max(MIN_ROW_HEIGHT)
 }
 
 /// Pending structural change, applied after the table is drawn so we never
@@ -123,10 +121,10 @@ pub fn show(app: &mut LvrApp, ui: &mut Ui) {
         .column(Column::exact(STOPS_WIDTH))
         .column(Column::remainder().at_least(MIN_STATUS_WIDTH))
         .column(Column::exact(actions_width))
-        .header(28.0, |mut header| {
+        .header(24.0, |mut header| {
             for title in ["On", "Name", "Trigger", "Stops", "Status", ""] {
                 header.col(|ui| {
-                    ui.label(RichText::new(title).size(13.0).strong().color(GREY));
+                    ui.label(RichText::new(title).size(12.0).strong().color(GREY));
                 });
             }
         })
@@ -142,9 +140,9 @@ pub fn show(app: &mut LvrApp, ui: &mut Ui) {
                     });
                     row.col(|ui| {
                         ui.vertical(|ui| {
-                            ui.label(RichText::new(entry.name_or_id()).size(15.0).strong());
+                            ui.label(RichText::new(entry.name_or_id()).size(13.0).strong());
                             if entry.console {
-                                ui.label(RichText::new("console").size(11.0).color(GREY));
+                                ui.label(RichText::new("console").size(10.0).color(GREY));
                             }
                         });
                     });
@@ -152,14 +150,14 @@ pub fn show(app: &mut LvrApp, ui: &mut Ui) {
                         let color = if status.trigger_active { GREEN } else { GREY };
                         ui.label(
                             RichText::new(entry.trigger.to_string())
-                                .size(13.0)
+                                .size(12.0)
                                 .color(color),
                         );
                     });
                     row.col(|ui| {
                         ui.label(
                             RichText::new(widgets::format_grace(entry.grace_secs))
-                                .size(13.0)
+                                .size(12.0)
                                 .color(if entry.keeps_running() { BLUE } else { GREY }),
                         );
                     });
@@ -167,7 +165,7 @@ pub fn show(app: &mut LvrApp, ui: &mut Ui) {
                         let color = widgets::on_off(status.running);
                         ui.set_max_width(status_width);
                         ui.horizontal_top(|ui| {
-                            ui.label(RichText::new("⏺").size(16.0).color(color));
+                            ui.label(RichText::new("⏺").size(13.0).color(color));
                             ui.add(
                                 egui::Label::new(
                                     RichText::new(super::dashboard::detail_line(&status))
@@ -180,19 +178,20 @@ pub fn show(app: &mut LvrApp, ui: &mut Ui) {
                     });
                     row.col(|ui| {
                         if status.running {
-                            if widgets::row_button(ui, "Stop", Some(ORANGE), 74.0).clicked() {
+                            if widgets::compact_button(ui, "Stop", Some(ORANGE), 54.0).clicked() {
                                 pending = Some(Pending::Stop(entry.id.clone()));
                             }
-                        } else if widgets::row_button(ui, "Start", Some(GREEN), 74.0).clicked() {
+                        } else if widgets::compact_button(ui, "Start", Some(GREEN), 54.0).clicked() {
                             pending = Some(Pending::Start(entry.id.clone()));
                         }
-                        if widgets::row_button(ui, "Edit", None, 74.0).clicked() {
+                        if widgets::compact_button(ui, "Edit", None, 50.0).clicked() {
                             pending = Some(Pending::Edit(entry.id.clone()));
                         }
                         if ui
                             .add_enabled(
                                 index > 0,
-                                egui::Button::new("Up").min_size(egui::vec2(44.0, 38.0)),
+                                egui::Button::new(RichText::new("Up").size(12.0))
+                                    .min_size(egui::vec2(34.0, 26.0)),
                             )
                             .clicked()
                         {
@@ -201,13 +200,14 @@ pub fn show(app: &mut LvrApp, ui: &mut Ui) {
                         if ui
                             .add_enabled(
                                 index + 1 < entries.len(),
-                                egui::Button::new("Down").min_size(egui::vec2(54.0, 38.0)),
+                                egui::Button::new(RichText::new("Down").size(12.0))
+                                    .min_size(egui::vec2(44.0, 26.0)),
                             )
                             .clicked()
                         {
                             pending = Some(Pending::MoveDown(index));
                         }
-                        if widgets::row_button(ui, "Delete", Some(RED), 82.0).clicked() {
+                        if widgets::compact_button(ui, "Delete", Some(RED), 60.0).clicked() {
                             pending = Some(Pending::Delete(entry.id.clone()));
                         }
                     });
@@ -438,7 +438,7 @@ mod tests {
             width >= needed,
             "action column {width} cannot hold {needed} of buttons"
         );
-        assert_eq!(width, 368.0);
+        assert_eq!(width, 282.0);
     }
 
     #[test]
