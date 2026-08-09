@@ -39,14 +39,18 @@ pub fn row_button(ui: &mut Ui, label: &str, tint: Option<Color32>, width: f32) -
     ui.add_sized(Vec2::new(width, ROW_BUTTON_HEIGHT), button)
 }
 
-/// A compact button for tight table rows.
+/// A compact button for tight table rows. Width <= 0.0 auto-sizes to fit the label.
 pub fn compact_button(ui: &mut Ui, label: &str, tint: Option<Color32>, width: f32) -> Response {
     let mut button =
         egui::Button::new(RichText::new(label).size(11.0)).corner_radius(CornerRadius::same(4));
     if let Some(tint) = tint {
         button = button.fill(tint.gamma_multiply(0.20)).stroke((1.0, tint));
     }
-    ui.add_sized(Vec2::new(width, 17.0), button)
+    if width > 0.0 {
+        ui.add_sized(Vec2::new(width, 22.0), button)
+    } else {
+        ui.add(button)
+    }
 }
 
 /// Coloured status chip, e.g. "WiVRn: running".
