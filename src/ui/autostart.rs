@@ -9,7 +9,7 @@ use crate::config::{AutostartEntry, Trigger};
 use crate::state::Command;
 
 const ON_WIDTH: f32 = 36.0;
-const NAME_WIDTH: f32 = 150.0;
+const NAME_WIDTH: f32 = 120.0;
 const TRIGGER_WIDTH: f32 = 140.0;
 const STOPS_WIDTH: f32 = 110.0;
 /// Status never shrinks below this; past that point the table scrolls instead.
@@ -20,7 +20,7 @@ const STATUS_TEXT_SIZE: f32 = 11.0;
 /// Room for the status dot that sits left of the wrapped text.
 const STATUS_DOT_WIDTH: f32 = 20.0;
 /// Floor for any row in compact mode.
-const MIN_ROW_HEIGHT: f32 = 34.0;
+const MIN_ROW_HEIGHT: f32 = 28.0;
 
 /// Compact widths of the action buttons, in the order they are drawn.
 const ACTION_BUTTON_WIDTHS: [f32; 5] = [54.0, 50.0, 34.0, 44.0, 60.0];
@@ -41,7 +41,7 @@ fn row_height(ui: &egui::Ui, status_text: &str, status_width: f32) -> f32 {
         egui::Color32::PLACEHOLDER,
         wrap_width,
     );
-    (galley.size().y + 8.0).max(MIN_ROW_HEIGHT)
+    (galley.size().y + 6.0).max(MIN_ROW_HEIGHT)
 }
 
 /// Pending structural change, applied after the table is drawn so we never
@@ -191,7 +191,7 @@ pub fn show(app: &mut LvrApp, ui: &mut Ui) {
                             .add_enabled(
                                 index > 0,
                                 egui::Button::new(RichText::new("Up").size(12.0))
-                                    .min_size(egui::vec2(34.0, 26.0)),
+                                    .min_size(egui::vec2(34.0, 22.0)),
                             )
                             .clicked()
                         {
@@ -201,7 +201,7 @@ pub fn show(app: &mut LvrApp, ui: &mut Ui) {
                             .add_enabled(
                                 index + 1 < entries.len(),
                                 egui::Button::new(RichText::new("Down").size(12.0))
-                                    .min_size(egui::vec2(44.0, 26.0)),
+                                    .min_size(egui::vec2(44.0, 22.0)),
                             )
                             .clicked()
                         {

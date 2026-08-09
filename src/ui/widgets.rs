@@ -42,11 +42,11 @@ pub fn row_button(ui: &mut Ui, label: &str, tint: Option<Color32>, width: f32) -
 /// A compact button for tight table rows.
 pub fn compact_button(ui: &mut Ui, label: &str, tint: Option<Color32>, width: f32) -> Response {
     let mut button =
-        egui::Button::new(RichText::new(label).size(12.0)).corner_radius(CornerRadius::same(6));
+        egui::Button::new(RichText::new(label).size(12.0)).corner_radius(CornerRadius::same(5));
     if let Some(tint) = tint {
         button = button.fill(tint.gamma_multiply(0.20)).stroke((1.0, tint));
     }
-    ui.add_sized(Vec2::new(width, 26.0), button)
+    ui.add_sized(Vec2::new(width, 22.0), button)
 }
 
 /// Coloured status chip, e.g. "WiVRn: running".
