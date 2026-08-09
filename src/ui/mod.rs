@@ -573,4 +573,59 @@ mod tests {
         labels.dedup();
         assert_eq!(labels.len(), count);
     }
+
+    #[test]
+    fn ui_fits_in_viewport_without_horizontal_overflow() {
+        let ctx = egui::Context::default();
+        let (shared, _rx) = crate::state::Shared::new(
+            crate::config::Config::default(),
+            std::path::PathBuf::from("/tmp/lvr-viewport-test.toml"),
+        );
+        let saved_config = shared.config_snapshot();
+        let mut app = LvrApp {
+            status: shared.status_snapshot(),
+            shared,
+            tab: Tab::Dashboard,
+            editor: None,
+            confirming_stop_all: false,
+            saved_config,
+            dirty_since: None,
+            applied_zoom: 1.0,
+            log_levels: [false, true, true, true],
+            log_filter: String::new(),
+            log_wrap: true,
+        };
+
+        let viewport_size = egui::vec2(960.0, 640.0);
+        let raw_input = egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(
+                egui::Pos2::ZERO,
+                viewport_size,
+            )),
+            ..Default::default()
+        };
+
+        for tab in Tab::ALL {
+            app.tab = tab;
+            let mut full_output = ctx.run_ui(raw_input.clone(), |ctx| {
+                egui::CentralPanel::default().show(ctx, |ui| match app.tab {
+                    Tab::Dashboard => dashboard::show(&mut app, ui),
+                    Tab::Autostart => autostart::show(&mut app, ui),
+                    Tab::Audio => audio_tab::show(&mut app, ui),
+                    Tab::Settings => settings::show(&mut app, ui),
+                    Tab::Logs => logs::show(&mut app, ui),
+                });
+            });
+            full_output.textures_delta.clear();
+
+            let used_rect = ctx.globally_used_rect();
+            assert!(
+                used_rect.max.x <= viewport_size.x + 1.0,
+                "Tab {:?} overflowed viewport horizontally: used_x={}, viewport_x={}",
+                tab,
+                used_rect.max.x,
+                viewport_size.x
+            );
+        }
+    }
 }
