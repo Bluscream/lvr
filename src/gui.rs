@@ -22,6 +22,7 @@ pub struct LinuxVrGui {
     new_rule_cmd: String,
     new_rule_trigger: TriggerType,
     new_rule_grace: String,
+    new_rule_patterns: String,
     show_add_modal: bool,
 }
 
@@ -35,6 +36,7 @@ impl LinuxVrGui {
             new_rule_cmd: String::new(),
             new_rule_trigger: TriggerType::VRChat,
             new_rule_grace: "120".to_string(),
+            new_rule_patterns: String::new(),
             show_add_modal: false,
         }
     }
@@ -300,6 +302,10 @@ impl LinuxVrGui {
                     ui.text_edit_singleline(&mut self.new_rule_grace);
                 });
                 ui.horizontal(|ui| {
+                    ui.label("Match (comma separated, blank = derive from command):");
+                    ui.text_edit_singleline(&mut self.new_rule_patterns);
+                });
+                ui.horizontal(|ui| {
                     if ui.button("Save Rule").clicked()
                         && !self.new_rule_name.is_empty()
                         && !self.new_rule_cmd.is_empty()
@@ -312,12 +318,19 @@ impl LinuxVrGui {
                             exec_cmd: self.new_rule_cmd.clone(),
                             trigger: self.new_rule_trigger.clone(),
                             grace_period_secs: grace,
+                            match_patterns: self
+                                .new_rule_patterns
+                                .split(',')
+                                .map(|p| p.trim().to_string())
+                                .filter(|p| !p.is_empty())
+                                .collect(),
                         };
                         let mut cfg = self.state.config.lock().unwrap();
                         cfg.autostart_rules.push(rule);
                         let _ = cfg.save();
                         self.new_rule_name.clear();
                         self.new_rule_cmd.clear();
+                        self.new_rule_patterns.clear();
                         self.show_add_modal = false;
                     }
                     if ui.button("Cancel").clicked() {
@@ -443,8 +456,12 @@ impl LinuxVrGui {
             .min_size(Vec2::new(260.0, 50.0));
 
             if ui.add(restore_btn).clicked() {
-                let mut switcher = crate::audio::AudioSwitcher::new();
-                switcher.restore_previous_audio();
+                self.state
+                    .audio_switcher
+                    .lock()
+                    .unwrap()
+                    .restore_previous_audio();
+                *self.state.wivrn_audio_connected.lock().unwrap() = false;
                 self.state.add_log("Manually restored system default audio devices.");
             }
         });

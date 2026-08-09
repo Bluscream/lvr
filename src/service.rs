@@ -13,6 +13,11 @@ pub struct AppState {
     pub wivrn_running: Arc<Mutex<bool>>,
     pub vrchat_running: Arc<Mutex<bool>>,
     pub wivrn_audio_connected: Arc<Mutex<bool>>,
+    /// Shared so that the nuke action and the GUI's "restore" button operate on
+    /// the switcher that actually holds the saved devices. They used to build a
+    /// fresh AudioSwitcher, whose saved devices were always None, so restoring
+    /// audio silently did nothing.
+    pub audio_switcher: Arc<Mutex<AudioSwitcher>>,
 }
 
 impl AppState {
@@ -23,6 +28,7 @@ impl AppState {
             wivrn_running: Arc::new(Mutex::new(false)),
             vrchat_running: Arc::new(Mutex::new(false)),
             wivrn_audio_connected: Arc::new(Mutex::new(false)),
+            audio_switcher: Arc::new(Mutex::new(AudioSwitcher::new())),
         }
     }
 
@@ -41,7 +47,6 @@ impl AppState {
 pub struct ServiceWorker {
     pub state: AppState,
     pub process_manager: ProcessManager,
-    pub audio_switcher: AudioSwitcher,
     pub last_wivrn_spawn: Option<std::time::Instant>,
 }
 
@@ -50,7 +55,6 @@ impl ServiceWorker {
         Self {
             state,
             process_manager: ProcessManager::new(),
-            audio_switcher: AudioSwitcher::new(),
             last_wivrn_spawn: None,
         }
     }
@@ -90,14 +94,18 @@ impl ServiceWorker {
 
             // 2. Audio switcher check
             if config_clone.auto_switch_audio {
-                let prev_state = self.audio_switcher.current_state.clone();
-                self.audio_switcher.update();
+                let (prev_state, new_state) = {
+                    let mut switcher = self.state.audio_switcher.lock().unwrap();
+                    let prev_state = switcher.current_state.clone();
+                    switcher.update();
+                    (prev_state, switcher.current_state.clone())
+                };
 
-                let connected = self.audio_switcher.current_state == crate::audio::AudioState::ConnectedToWiVRn;
+                let connected = new_state == crate::audio::AudioState::ConnectedToWiVRn;
                 *self.state.wivrn_audio_connected.lock().unwrap() = connected;
 
-                if prev_state != self.audio_switcher.current_state {
-                    match self.audio_switcher.current_state {
+                if prev_state != new_state {
+                    match new_state {
                         crate::audio::AudioState::ConnectedToWiVRn => {
                             self.state.add_log("Audio switched to WiVRn headset!");
                         }
@@ -117,7 +125,11 @@ impl ServiceWorker {
         let config_clone = self.state.config.lock().unwrap().clone();
         self.state.add_log("Initiating Nuke VR & WiVRn Restart...");
         self.process_manager.nuke_vr_and_restart(&config_clone);
-        self.audio_switcher.restore_previous_audio();
+        self.state
+            .audio_switcher
+            .lock()
+            .unwrap()
+            .restore_previous_audio();
         *self.state.wivrn_audio_connected.lock().unwrap() = false;
         self.state.add_log("Nuke complete. WiVRn restart initiated.");
     }
