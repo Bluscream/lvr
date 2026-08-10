@@ -48,10 +48,11 @@ refresh_caches() {
         update-desktop-database "$APP_DIR" >/dev/null 2>&1 || true
     command -v gtk-update-icon-cache >/dev/null 2>&1 &&
         gtk-update-icon-cache -f -t "$HOME/.local/share/icons/hicolor" >/dev/null 2>&1 || true
-    command -v kbuildsycoca6 >/dev/null 2>&1 &&
+    if command -v kbuildsycoca6 >/dev/null 2>&1; then
         kbuildsycoca6 --noincremental >/dev/null 2>&1 || true
-    command -v kbuildsycoca5 >/dev/null 2>&1 &&
+    elif command -v kbuildsycoca5 >/dev/null 2>&1; then
         kbuildsycoca5 >/dev/null 2>&1 || true
+    fi
 }
 
 if [ "$action" = uninstall ]; then
