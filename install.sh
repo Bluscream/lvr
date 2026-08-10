@@ -105,13 +105,11 @@ install_file() {
 }
 
 entry="$SOURCE_DIR/target/$DESKTOP_ID.desktop"
-if [ "$DESKTOP_ID" = lvr ]; then
-    cp "$SOURCE_DIR/assets/lvr.desktop" "$entry"
-else
-    # A custom id means another lvr is already in the menu, so make the two
-    # tellable apart at a glance.
-    sed "s|^Name=LinuxVR$|Name=LinuxVR ($DESKTOP_ID)|" \
-        "$SOURCE_DIR/assets/lvr.desktop" > "$entry"
+# Expand `Exec=lvr` to full executable path in BIN_DIR so XDG autostart & session managers
+# can always find the binary regardless of session PATH settings.
+sed -e "s|^Exec=lvr|Exec=$BIN_DIR/lvr|g" "$SOURCE_DIR/assets/lvr.desktop" > "$entry"
+if [ "$DESKTOP_ID" != lvr ]; then
+    sed -i "s|^Name=LinuxVR$|Name=LinuxVR ($DESKTOP_ID)|" "$entry"
 fi
 
 echo "Installing…"
@@ -126,7 +124,7 @@ fi
 
 if [ "$autostart" = yes ]; then
     mkdir -p "$AUTOSTART_DIR"
-    sed 's|^Exec=lvr$|Exec=lvr --hidden|' "$entry" \
+    sed "s|^Exec=$BIN_DIR/lvr$|Exec=$BIN_DIR/lvr --hidden|" "$entry" \
         > "$SOURCE_DIR/target/$DESKTOP_ID-autostart.desktop"
     install_file 644 "$SOURCE_DIR/target/$DESKTOP_ID-autostart.desktop" \
                      "$AUTOSTART_DIR/$DESKTOP_ID.desktop"
