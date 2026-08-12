@@ -15,6 +15,8 @@ pub fn show(app: &mut LvrApp, ui: &mut Ui) {
         ui.add_space(12.0);
         vrchat(app, ui);
         ui.add_space(12.0);
+        steam(app, ui);
+        ui.add_space(12.0);
         about(app, ui);
     });
 }
@@ -263,6 +265,145 @@ fn vrchat(app: &mut LvrApp, ui: &mut Ui) {
             .filter(|line| !line.is_empty())
             .collect();
         app.shared.config().general.vrchat_match = patterns;
+    }
+}
+
+fn steam(app: &mut LvrApp, ui: &mut Ui) {
+    widgets::heading(ui, "Steam Proton profiles");
+    ui.label(
+        RichText::new(
+            "The dashboard button cycles these profiles for one Steam AppID. Switching \
+             quits Steam, rewrites config.vdf and localconfig.vdf (a .lvr.bak is kept) \
+             and starts Steam again.",
+        )
+        .size(13.0)
+        .color(GREY),
+    );
+    ui.add_space(6.0);
+
+    egui::Grid::new("settings-steam")
+        .num_columns(2)
+        .spacing([14.0, 12.0])
+        .min_col_width(190.0)
+        .show(ui, |ui| {
+            ui.label("Profile switching");
+            {
+                let mut config = app.shared.config();
+                widgets::toggle(
+                    ui,
+                    &mut config.steam.enabled,
+                    "show the profile button on the dashboard",
+                );
+            }
+            ui.end_row();
+
+            ui.label("Confirm switch");
+            {
+                let mut config = app.shared.config();
+                widgets::toggle(
+                    ui,
+                    &mut config.steam.confirm_switch,
+                    "ask before restarting Steam",
+                );
+            }
+            ui.end_row();
+
+            ui.label("AppID");
+            {
+                let mut config = app.shared.config();
+                ui.add(
+                    egui::TextEdit::singleline(&mut config.steam.app_id)
+                        .desired_width(140.0)
+                        .hint_text("438100"),
+                );
+            }
+            ui.end_row();
+
+            ui.label("Shutdown command");
+            {
+                let mut config = app.shared.config();
+                ui.add(
+                    egui::TextEdit::singleline(&mut config.steam.shutdown_command)
+                        .desired_width(430.0),
+                );
+            }
+            ui.end_row();
+
+            ui.label("Start command");
+            {
+                let mut config = app.shared.config();
+                ui.add(
+                    egui::TextEdit::singleline(&mut config.steam.start_command)
+                        .desired_width(430.0),
+                );
+            }
+            ui.end_row();
+
+            ui.label("Shutdown timeout");
+            {
+                let mut config = app.shared.config();
+                ui.add(
+                    egui::DragValue::new(&mut config.steam.shutdown_timeout_secs)
+                        .range(5..=300)
+                        .speed(1.0)
+                        .suffix(" s"),
+                );
+            }
+            ui.end_row();
+        });
+
+    let active = app.status.steam_profile.clone();
+    let count = app.shared.config().steam.profiles.len();
+    for index in 0..count {
+        let (name, is_active) = {
+            let config = app.shared.config();
+            let profile = &config.steam.profiles[index];
+            (profile.name.clone(), Some(&profile.name) == active.as_ref())
+        };
+        ui.add_space(8.0);
+        egui::Frame::group(ui.style())
+            .corner_radius(egui::CornerRadius::same(10))
+            .show(ui, |ui| {
+                ui.horizontal(|ui| {
+                    ui.label(RichText::new(&name).size(16.0).strong());
+                    if is_active {
+                        ui.label(RichText::new("active").size(13.0).color(GREEN));
+                    }
+                });
+                let mut config = app.shared.config();
+                let profile = &mut config.steam.profiles[index];
+                ui.add(
+                    egui::TextEdit::singleline(&mut profile.name)
+                        .desired_width(430.0)
+                        .hint_text("button label"),
+                );
+                ui.add(
+                    egui::TextEdit::singleline(&mut profile.compat_tool)
+                        .desired_width(430.0)
+                        .hint_text("compat tool, e.g. GE-Proton9-25"),
+                );
+                ui.add(
+                    egui::TextEdit::multiline(&mut profile.launch_options)
+                        .desired_rows(3)
+                        .desired_width(430.0)
+                        .font(egui::TextStyle::Monospace)
+                        .hint_text("launch options including %command%"),
+                );
+                ui.add(
+                    egui::TextEdit::singleline(&mut profile.note)
+                        .desired_width(430.0)
+                        .hint_text("note shown in the confirmation"),
+                );
+            });
+    }
+
+    if !app.status.steam_compat_tool.is_empty() {
+        ui.add_space(6.0);
+        ui.label(
+            RichText::new(format!("On disk right now: {}", app.status.steam_compat_tool))
+                .size(12.0)
+                .color(if active.is_some() { GREY } else { ORANGE }),
+        );
     }
 }
 

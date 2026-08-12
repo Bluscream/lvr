@@ -81,6 +81,11 @@ fn status_row(app: &LvrApp, ui: &mut Ui) {
                 widgets::on_off(status.session_running),
             );
         }
+        if let Some(profile) = &status.steam_profile {
+            widgets::pill(ui, "VRC Proton", profile, BLUE);
+        } else if !status.steam_compat_tool.is_empty() {
+            widgets::pill(ui, "VRC Proton", &status.steam_compat_tool, ORANGE);
+        }
         if status.watchdog_paused {
             widgets::pill(ui, "Watchdog", "Paused", ORANGE);
         }
@@ -104,13 +109,7 @@ fn actions(app: &mut LvrApp, ui: &mut Ui) {
         if widgets::big_button(ui, "Restart WiVRn", Some(BLUE), button_width).clicked() {
             app.shared.send(Command::RestartWivrn);
         }
-        if app.status.wivrn_running {
-            if widgets::big_button(ui, "Stop WiVRn", Some(ORANGE), button_width).clicked() {
-                app.shared.send(Command::StopWivrn);
-            }
-        } else if widgets::big_button(ui, "Start WiVRn", Some(GREEN), button_width).clicked() {
-            app.shared.send(Command::StartWivrn);
-        }
+        steam_profile_button(app, ui, button_width);
         if widgets::big_button(ui, "Disconnect headset", None, button_width).clicked() {
             app.shared.send(Command::DisconnectHeadset);
         }
@@ -142,6 +141,41 @@ fn actions(app: &mut LvrApp, ui: &mut Ui) {
     });
 }
 
+/// The Proton profile toggle: shows the profile it would switch *to*.
+fn steam_profile_button(app: &mut LvrApp, ui: &mut Ui, width: f32) {
+    let steam = app.shared.config().steam.clone();
+    if !steam.enabled {
+        return;
+    }
+
+    if app.status.steam_switching {
+        let _ = widgets::big_button(ui, "Switching…", Some(GREY), width);
+        return;
+    }
+
+    let active = app.status.steam_profile.clone();
+    let Some(next) = steam.next_profile(active.as_deref()) else {
+        return;
+    };
+    let tint = if active.is_none() { ORANGE } else { BLUE };
+    let response = widgets::big_button(ui, &next.name, Some(tint), width);
+    let response = response.on_hover_text(match &active {
+        Some(name) => format!("VRChat is on \"{name}\" — switch to \"{}\"", next.name),
+        None => format!(
+            "VRChat is on an unknown compat tool ({}) — switch to \"{}\"",
+            if app.status.steam_compat_tool.is_empty() {
+                "none"
+            } else {
+                &app.status.steam_compat_tool
+            },
+            next.name
+        ),
+    });
+    if response.clicked() {
+        app.request_steam_switch(next.name.clone());
+    }
+}
+
 fn managed_apps(app: &mut LvrApp, ui: &mut Ui) {
     widgets::heading(ui, "Managed apps");
 
@@ -152,37 +186,29 @@ fn managed_apps(app: &mut LvrApp, ui: &mut Ui) {
         return;
     }
 
+    let full = ui.available_width();
+    let button_width = ((full - 30.0) / 3.0).max(150.0);
+
     let entries = app.status.entries.clone();
-    for entry in entries {
-        egui::Frame::group(ui.style())
-            .corner_radius(egui::CornerRadius::same(10))
-            .show(ui, |ui| {
-                ui.horizontal(|ui| {
-                    let color = widgets::on_off(entry.running);
-                    ui.label(RichText::new("⏺").size(20.0).color(color));
-                    ui.vertical(|ui| {
-                        ui.label(RichText::new(&entry.name).size(17.0).strong());
-                        ui.label(
-                            RichText::new(detail_line(
-                                &entry,
-                                app.shared.config().general.show_debug_info,
-                            ))
-                            .size(13.0)
-                            .color(GREY),
-                        );
-                    });
-                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        if entry.running {
-                            if widgets::row_button(ui, "Stop", Some(ORANGE), 110.0).clicked() {
-                                app.shared.send(Command::StopEntry(entry.id.clone()));
-                            }
-                        } else if widgets::row_button(ui, "Start", Some(GREEN), 110.0).clicked() {
-                            app.shared.send(Command::StartEntry(entry.id.clone()));
-                        }
-                    });
-                });
-            });
-    }
+    ui.horizontal_wrapped(|ui| {
+        for entry in entries {
+            let tint = if entry.running { ORANGE } else { GREEN };
+            let status_text = detail_line(&entry, app.shared.config().general.show_debug_info);
+            let response = widgets::big_button(ui, &entry.name, Some(tint), button_width);
+            let response = response.on_hover_text(format!(
+                "{} ({})",
+                if entry.running { "Click to stop" } else { "Click to start" },
+                status_text
+            ));
+            if response.clicked() {
+                if entry.running {
+                    app.shared.send(Command::StopEntry(entry.id.clone()));
+                } else {
+                    app.shared.send(Command::StartEntry(entry.id.clone()));
+                }
+            }
+        }
+    });
 }
 
 /// One line of context under an app's name.

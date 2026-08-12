@@ -9,6 +9,7 @@ mod icon;
 mod ipc;
 mod procs;
 mod state;
+mod steam;
 mod tray;
 mod ui;
 mod wivrn;

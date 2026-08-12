@@ -28,6 +28,9 @@ pub enum Command {
     RefreshAudioDevices,
     /// Persist the current config to disk.
     SaveConfig,
+    /// Point the managed Steam app at the named Proton profile, restarting
+    /// Steam around the edit.
+    SwitchSteamProfile(String),
     Quit,
 }
 
@@ -45,6 +48,12 @@ pub struct Status {
     pub default_source: String,
     pub audio_on_vr: bool,
     pub entries: Vec<EntryStatus>,
+    /// Name of the configured Steam profile matching what is on disk, if any.
+    pub steam_profile: Option<String>,
+    /// Compat tool the managed Steam app is pinned to right now.
+    pub steam_compat_tool: String,
+    /// A profile switch is in progress (Steam is being restarted).
+    pub steam_switching: bool,
     pub sinks: Vec<AudioDevice>,
     pub sources: Vec<AudioDevice>,
     pub last_tick: Option<DateTime<Local>>,

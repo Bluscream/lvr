@@ -12,6 +12,7 @@ use crate::audio::{self, Kind};
 use crate::config::{AutostartEntry, Config, Trigger};
 use crate::procs::{self, ChildRegistry, ProcSnapshot, ProcessScanner};
 use crate::state::{Command, EntryStatus, Shared, Status};
+use crate::steam;
 use crate::wivrn::{WivrnClient, WivrnState};
 
 /// What the planner decided to do with one entry this tick.
@@ -191,12 +192,23 @@ pub struct Engine {
     cached_sources: Vec<crate::state::AudioDevice>,
     cached_default_sink: String,
     cached_default_source: String,
+    steam: SteamState,
+}
+
+/// Cached Steam profile state, refreshed on a slow timer.
+#[derive(Debug, Default)]
+struct SteamState {
+    profile: Option<String>,
+    compat_tool: String,
+    switching: bool,
+    last_poll: Option<Instant>,
 }
 
 const AUDIO_POLL_INTERVAL: Duration = Duration::from_secs(2);
 const DEVICE_POLL_INTERVAL: Duration = Duration::from_secs(15);
 const WIVRN_SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(10);
 const WIVRN_STARTUP_TIMEOUT: Duration = Duration::from_secs(25);
+const STEAM_POLL_INTERVAL: Duration = Duration::from_secs(10);
 
 impl Engine {
     pub fn new(shared: Shared, rx: UnboundedReceiver<Command>) -> Self {
@@ -215,6 +227,7 @@ impl Engine {
             cached_sources: Vec::new(),
             cached_default_sink: String::new(),
             cached_default_source: String::new(),
+            steam: SteamState::default(),
         }
     }
 
@@ -268,6 +281,7 @@ impl Engine {
                 self.last_device_poll = None;
                 self.last_audio_poll = None;
             }
+            Command::SwitchSteamProfile(name) => self.switch_steam_profile(&name).await,
             Command::SaveConfig => match self.shared.save_config() {
                 Ok(()) => self
                     .shared
@@ -294,6 +308,7 @@ impl Engine {
             .apply_entries(&config, &snapshot, &wivrn, vrchat_running)
             .await;
         self.refresh_audio_cache(&config).await;
+        self.refresh_steam_cache(&config);
 
         let status = Status {
             wivrn_running: wivrn.running,
@@ -307,6 +322,9 @@ impl Engine {
             default_source: self.cached_default_source.clone(),
             audio_on_vr: self.audio.on_vr,
             entries: entry_status,
+            steam_profile: self.steam.profile.clone(),
+            steam_compat_tool: self.steam.compat_tool.clone(),
+            steam_switching: self.steam.switching,
             sinks: self.cached_sinks.clone(),
             sources: self.cached_sources.clone(),
             last_tick: Some(chrono::Local::now()),
@@ -814,6 +832,105 @@ impl Engine {
         self.shared
             .info("Everything VR stopped. WiVRn watchdog is paused until you start it again.");
     }
+
+    // ------------------------------------------------------------ steam profile
+
+    /// Re-read which Proton profile the managed app is pinned to. Cheap enough
+    /// (two file reads) but pointless every tick.
+    fn refresh_steam_cache(&mut self, config: &Config) {
+        if !config.steam.enabled {
+            self.steam = SteamState::default();
+            return;
+        }
+        if self.steam.switching {
+            return;
+        }
+        if let Some(last) = self.steam.last_poll
+            && last.elapsed() < STEAM_POLL_INTERVAL
+        {
+            return;
+        }
+        self.steam.last_poll = Some(Instant::now());
+        match steam::SteamPaths::discover(&config.steam, &config.steam.app_id)
+            .and_then(|paths| steam::read_setup(&paths, &config.steam.app_id))
+        {
+            Ok(setup) => {
+                self.steam.profile = steam::active_profile(&config.steam, &setup);
+                self.steam.compat_tool = setup.compat_tool;
+            }
+            Err(err) => {
+                tracing::debug!("reading the Steam profile failed: {err:#}");
+                self.steam.profile = None;
+                self.steam.compat_tool.clear();
+            }
+        }
+    }
+
+    async fn switch_steam_profile(&mut self, name: &str) {
+        let config = self.shared.config_snapshot();
+        if !config.steam.enabled {
+            self.shared.warn("Steam profile switching is disabled in the config");
+            return;
+        }
+        let Some(profile) = config.steam.profiles.iter().find(|p| p.name == name) else {
+            self.shared.error(format!("No Steam profile named \"{name}\""));
+            return;
+        };
+
+        self.steam.switching = true;
+        let result = self.apply_steam_profile(&config, profile).await;
+        self.steam.switching = false;
+        self.steam.last_poll = None;
+
+        match result {
+            Ok(()) => {
+                self.steam.profile = Some(profile.name.clone());
+                self.steam.compat_tool = profile.compat_tool.clone();
+                self.shared.info(format!(
+                    "VRChat now runs on {} ({}). Steam is starting again.",
+                    profile.name, profile.compat_tool
+                ));
+            }
+            Err(err) => self
+                .shared
+                .error(format!("Switching to {} failed: {err:#}", profile.name)),
+        }
+    }
+
+    /// Quit Steam, rewrite the two VDF files, start Steam again.
+    async fn apply_steam_profile(
+        &mut self,
+        config: &Config,
+        profile: &crate::config::SteamProfile,
+    ) -> anyhow::Result<()> {
+        let paths = steam::SteamPaths::discover(&config.steam, &config.steam.app_id)?;
+        let compat_dir = paths.root.join("compatibilitytools.d").join(&profile.compat_tool);
+        if !compat_dir.is_dir() {
+            self.shared.warn(format!(
+                "{} is not installed under {} — Steam may fall back to another Proton",
+                profile.compat_tool,
+                compat_dir.parent().unwrap_or(&paths.root).display()
+            ));
+        }
+
+        if steam::steam_running() {
+            self.shared.info("Shutting Steam down so it cannot overwrite its config…");
+            steam::shutdown_steam(&config.steam).await?;
+        }
+
+        let setup = steam::AppSetup {
+            compat_tool: profile.compat_tool.clone(),
+            launch_options: profile.launch_options.clone(),
+        };
+        steam::write_setup(&paths, &config.steam.app_id, &setup)?;
+        self.shared.info(format!(
+            "Set AppID {} to {}",
+            config.steam.app_id, profile.compat_tool
+        ));
+
+        steam::start_steam(&config.steam).await?;
+        Ok(())
+    }
 }
 
 /// One-shot audio routing for `lvr --audio vr|desktop`, usable without a
@@ -885,6 +1002,14 @@ pub async fn probe(config: &Config) -> Status {
     let audio_on_vr =
         !config.audio.vr_sink.trim().is_empty() && default_sink == config.audio.vr_sink.trim();
 
+    let steam_setup = if config.steam.enabled {
+        steam::SteamPaths::discover(&config.steam, &config.steam.app_id)
+            .and_then(|paths| steam::read_setup(&paths, &config.steam.app_id))
+            .ok()
+    } else {
+        None
+    };
+
     Status {
         wivrn_running: wivrn.running,
         headset_connected: wivrn.headset_connected,
@@ -897,6 +1022,13 @@ pub async fn probe(config: &Config) -> Status {
         default_source,
         audio_on_vr,
         entries,
+        steam_profile: steam_setup
+            .as_ref()
+            .and_then(|setup| steam::active_profile(&config.steam, setup)),
+        steam_compat_tool: steam_setup
+            .map(|setup| setup.compat_tool)
+            .unwrap_or_default(),
+        steam_switching: false,
         sinks: audio::list_devices(Kind::Sink).await.unwrap_or_default(),
         sources: audio::list_devices(Kind::Source).await.unwrap_or_default(),
         last_tick: Some(chrono::Local::now()),

@@ -146,6 +146,8 @@ pub struct LvrApp {
     tab: Tab,
     editor: Option<EntryEditor>,
     confirming_stop_all: bool,
+    /// Name of the Steam profile awaiting confirmation.
+    confirming_steam_switch: Option<String>,
     saved_config: Config,
     dirty_since: Option<Instant>,
     applied_zoom: f32,
@@ -169,6 +171,7 @@ impl LvrApp {
             tab,
             editor: None,
             confirming_stop_all: false,
+            confirming_steam_switch: None,
             saved_config,
             dirty_since: None,
             applied_zoom: zoom,
@@ -384,6 +387,83 @@ impl LvrApp {
         }
     }
 
+    fn steam_switch_confirm_window(&mut self, ctx: &egui::Context) {
+        let Some(name) = self.confirming_steam_switch.clone() else {
+            return;
+        };
+        let steam = self.shared.config().steam.clone();
+        let Some(profile) = steam.profiles.iter().find(|p| p.name == name) else {
+            self.confirming_steam_switch = None;
+            return;
+        };
+
+        let mut open = true;
+        let mut decision: Option<bool> = None;
+        egui::Window::new(format!("Switch VRChat to \"{name}\"?"))
+            .open(&mut open)
+            .collapsible(false)
+            .resizable(false)
+            .anchor(egui::Align2::CENTER_CENTER, egui::Vec2::ZERO)
+            .show(ctx, |ui| {
+                if !profile.note.trim().is_empty() {
+                    ui.label(RichText::new(profile.note.trim()).size(15.0));
+                    ui.add_space(8.0);
+                }
+                ui.label(
+                    RichText::new(format!(
+                        "Steam will be shut down, AppID {} repointed at {}, and Steam \
+                         started again. Anything running under Steam closes with it — \
+                         your WiVRn session and headset are left alone.",
+                        steam.app_id, profile.compat_tool
+                    ))
+                    .size(15.0),
+                );
+                ui.add_space(8.0);
+                ui.label(
+                    RichText::new(format!("Launch options: {}", profile.launch_options))
+                        .size(12.0)
+                        .color(widgets::GREY),
+                );
+                ui.add_space(12.0);
+                ui.horizontal(|ui| {
+                    if widgets::big_button(
+                        ui,
+                        "Switch & restart Steam",
+                        Some(widgets::BLUE),
+                        260.0,
+                    )
+                    .clicked()
+                    {
+                        decision = Some(true);
+                    }
+                    if widgets::big_button(ui, "Cancel", None, 160.0).clicked() {
+                        decision = Some(false);
+                    }
+                });
+            });
+
+        match decision {
+            Some(true) => {
+                self.send(Command::SwitchSteamProfile(name));
+                self.confirming_steam_switch = None;
+            }
+            Some(false) => self.confirming_steam_switch = None,
+            None => {
+                if !open {
+                    self.confirming_steam_switch = None;
+                }
+            }
+        }
+    }
+
+    fn request_steam_switch(&mut self, name: String) {
+        if self.shared.config().steam.confirm_switch {
+            self.confirming_steam_switch = Some(name);
+        } else {
+            self.send(Command::SwitchSteamProfile(name));
+        }
+    }
+
     fn request_stop_all(&mut self) {
         if self.shared.config().general.confirm_stop_all {
             self.confirming_stop_all = true;
@@ -444,6 +524,7 @@ impl eframe::App for LvrApp {
         let ctx = ui.ctx().clone();
         self.entry_editor_window(&ctx);
         self.stop_all_confirm_window(&ctx);
+        self.steam_switch_confirm_window(&ctx);
     }
 
     fn on_exit(&mut self) {
@@ -616,6 +697,7 @@ mod tests {
             tab: Tab::Dashboard,
             editor: None,
             confirming_stop_all: false,
+            confirming_steam_switch: None,
             saved_config,
             dirty_since: None,
             applied_zoom: 1.0,
