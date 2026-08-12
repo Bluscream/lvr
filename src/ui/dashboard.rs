@@ -187,7 +187,9 @@ fn managed_apps(app: &mut LvrApp, ui: &mut Ui) {
     }
 
     let full = ui.available_width();
-    let button_width = ((full - 30.0) / 3.0).max(150.0);
+    let spacing = ui.spacing().item_spacing.x;
+    let cols = 4.0;
+    let button_width = ((full - spacing * (cols - 1.0)) / cols).max(110.0);
 
     let entries = app.status.entries.clone();
     ui.horizontal_wrapped(|ui| {
