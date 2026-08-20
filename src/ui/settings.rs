@@ -443,7 +443,7 @@ fn virtual_display(app: &mut LvrApp, ui: &mut Ui) {
                 let mut config = app.shared.config();
                 ui.add(
                     egui::TextEdit::singleline(&mut config.virtual_display.resolution)
-                        .hint_text("3840x2160@60"),
+                        .hint_text("3840x2160@120"),
                 );
             }
             ui.end_row();

@@ -141,7 +141,11 @@ fn actions(app: &mut LvrApp, ui: &mut Ui) {
                 app.shared.send(Command::StartEntry(id));
             }
         }
-        if widgets::big_button(ui, "Create 4K Display", Some(BLUE), button_width).clicked() {
+        if app.status.virtual_display_created {
+            if widgets::big_button(ui, "Remove Virtual Display", Some(ORANGE), button_width).clicked() {
+                app.shared.send(Command::RemoveVirtualDisplay);
+            }
+        } else if widgets::big_button(ui, "Create 4K Display", Some(BLUE), button_width).clicked() {
             app.shared.send(Command::CreateVirtualDisplay);
         }
         if widgets::big_button(ui, "Stop everything VR", Some(RED), button_width).clicked() {

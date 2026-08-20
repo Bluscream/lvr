@@ -387,7 +387,7 @@ impl Default for VirtualDisplayConfig {
         Self {
             create_on_startup: true,
             create_on_last_display_unplugged: true,
-            resolution: "3840x2160@60".into(),
+            resolution: "3840x2160@120".into(),
         }
     }
 }

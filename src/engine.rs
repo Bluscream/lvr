@@ -262,6 +262,10 @@ impl Engine {
             }
             self.tick().await;
         }
+        if self.virtual_display_created {
+            display::remove_virtual_display();
+            self.shared.info("Cleaned up virtual display on app exit");
+        }
         self.shared.info("Supervisor stopped");
     }
 
@@ -304,6 +308,11 @@ impl Engine {
                     self.shared.error("Failed to create virtual 4K display");
                 }
             }
+            Command::RemoveVirtualDisplay => {
+                display::remove_virtual_display();
+                self.virtual_display_created = false;
+                self.shared.info("Removed virtual display");
+            }
             Command::SaveConfig => match self.shared.save_config() {
                 Ok(()) => self
                     .shared
@@ -340,6 +349,12 @@ impl Engine {
                 if display::create_virtual_4k_display(&res) {
                     self.virtual_display_created = true;
                     self.shared.info("Virtual 4K display created on display disconnect");
+                }
+            } else if last_count == 0 && current_displays > 0 && self.virtual_display_created {
+                self.shared.info("Physical display re-connected, removing virtual display...");
+                if display::remove_virtual_display() {
+                    self.virtual_display_created = false;
+                    self.shared.info("Virtual display removed");
                 }
             }
         }

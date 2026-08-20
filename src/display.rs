@@ -35,10 +35,10 @@ pub fn get_connected_display_count() -> usize {
     count
 }
 
-/// Create/enable a virtual 4K display (3840x2160@60) using kscreen-doctor.
+/// Create/enable a virtual 4K display using kscreen-doctor.
 pub fn create_virtual_4k_display(resolution: &str) -> bool {
     let mode_str = if resolution.trim().is_empty() {
-        "3840x2160@60"
+        "3840x2160@120"
     } else {
         resolution.trim()
     };
@@ -76,6 +76,25 @@ pub fn create_virtual_4k_display(resolution: &str) -> bool {
                     false
                 }
             }
+        }
+    }
+}
+
+/// Disable/remove virtual display output using kscreen-doctor.
+pub fn remove_virtual_display() -> bool {
+    info!("Disabling virtual display output");
+    let status = Command::new("kscreen-doctor")
+        .arg("output.VIRTUAL-1.disable")
+        .status();
+
+    match status {
+        Ok(s) if s.success() => {
+            info!("Successfully disabled virtual display VIRTUAL-1");
+            true
+        }
+        _ => {
+            warn!("Could not disable VIRTUAL-1 output via kscreen-doctor");
+            false
         }
     }
 }

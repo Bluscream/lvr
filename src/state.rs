@@ -33,6 +33,8 @@ pub enum Command {
     SwitchSteamProfile(String),
     /// Create a virtual 4K display manually or on trigger.
     CreateVirtualDisplay,
+    /// Remove/disable virtual display manually or on trigger.
+    RemoveVirtualDisplay,
     Quit,
 }
 
