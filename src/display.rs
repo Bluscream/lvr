@@ -20,16 +20,22 @@ pub fn get_connected_display_count() -> usize {
         }
     };
 
-    let text = match std::str::from_utf8(&output) {
-        Ok(t) => t,
-        Err(_) => return 0,
+    let v: serde_json::Value = match serde_json::from_slice(&output) {
+        Ok(val) => val,
+        Err(err) => {
+            warn!("Failed to parse kscreen-doctor JSON output: {err}");
+            return 0;
+        }
     };
 
     let mut count = 0;
-    // Simple robust count of connected outputs from kscreen-doctor JSON output
-    for block in text.split('{') {
-        if block.contains("\"connected\": true") && block.contains("\"enabled\": true") {
-            count += 1;
+    if let Some(outputs) = v.get("outputs").and_then(|o| o.as_array()) {
+        for output in outputs {
+            let connected = output.get("connected").and_then(|c| c.as_bool()).unwrap_or(false);
+            let enabled = output.get("enabled").and_then(|e| e.as_bool()).unwrap_or(false);
+            if connected && enabled {
+                count += 1;
+            }
         }
     }
     count
