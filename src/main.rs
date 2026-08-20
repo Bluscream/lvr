@@ -4,6 +4,7 @@
 
 mod audio;
 mod config;
+mod display;
 mod engine;
 mod icon;
 mod ipc;

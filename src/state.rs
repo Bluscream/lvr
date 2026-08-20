@@ -31,6 +31,8 @@ pub enum Command {
     /// Point the managed Steam app at the named Proton profile, restarting
     /// Steam around the edit.
     SwitchSteamProfile(String),
+    /// Create a virtual 4K display manually or on trigger.
+    CreateVirtualDisplay,
     Quit,
 }
 
@@ -56,6 +58,8 @@ pub struct Status {
     pub steam_switching: bool,
     pub sinks: Vec<AudioDevice>,
     pub sources: Vec<AudioDevice>,
+    pub display_count: usize,
+    pub virtual_display_created: bool,
     pub last_tick: Option<DateTime<Local>>,
 }
 

@@ -17,6 +17,8 @@ pub fn show(app: &mut LvrApp, ui: &mut Ui) {
         ui.add_space(12.0);
         steam(app, ui);
         ui.add_space(12.0);
+        virtual_display(app, ui);
+        ui.add_space(12.0);
         about(app, ui);
     });
 }
@@ -405,6 +407,47 @@ fn steam(app: &mut LvrApp, ui: &mut Ui) {
                 .color(if active.is_some() { GREY } else { ORANGE }),
         );
     }
+}
+
+fn virtual_display(app: &mut LvrApp, ui: &mut Ui) {
+    widgets::heading(ui, "Virtual 4K Display");
+    egui::Grid::new("settings-virtual-display")
+        .num_columns(2)
+        .spacing([14.0, 12.0])
+        .min_col_width(190.0)
+        .show(ui, |ui| {
+            ui.label("Create on startup");
+            {
+                let mut config = app.shared.config();
+                widgets::toggle(
+                    ui,
+                    &mut config.virtual_display.create_on_startup,
+                    "automatically create a virtual 4K display when lvr starts",
+                );
+            }
+            ui.end_row();
+
+            ui.label("Create on last display unplugged");
+            {
+                let mut config = app.shared.config();
+                widgets::toggle(
+                    ui,
+                    &mut config.virtual_display.create_on_last_display_unplugged,
+                    "automatically create a 4K display when the last monitor is unplugged",
+                );
+            }
+            ui.end_row();
+
+            ui.label("Resolution mode");
+            {
+                let mut config = app.shared.config();
+                ui.add(
+                    egui::TextEdit::singleline(&mut config.virtual_display.resolution)
+                        .hint_text("3840x2160@60"),
+                );
+            }
+            ui.end_row();
+        });
 }
 
 fn about(app: &mut LvrApp, ui: &mut Ui) {

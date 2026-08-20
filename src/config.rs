@@ -279,6 +279,11 @@ pub struct SteamConfig {
     pub profiles: Vec<SteamProfile>,
 }
 
+const VRC_LAUNCH_BASE: &str = "G_TLS_GNUTLS_PRIORITY=NORMAL \
+     PRESSURE_VESSEL_IMPORT_OPENXR_1_RUNTIMES=1 \
+     PRESSURE_VESSEL_FILESYSTEMS_RW=/var/lib/flatpak/app/io.github.wivrn.wivrn \
+     %command% --enable-avpro-in-proton --enable-hw-video-decoding";
+
 impl Default for SteamConfig {
     fn default() -> Self {
         Self {
@@ -293,18 +298,17 @@ impl Default for SteamConfig {
             profiles: vec![
                 SteamProfile {
                     name: "Latest VRC".into(),
-                    compat_tool: "Proton-GE RTSP Latest".into(),
-                    launch_options: format!("{VRC_LAUNCH_BASE} --enable-avpro-in-proton"),
-                    note: "Newest Proton-GE. Best for VRChat itself; AVPro video \
-                           playback is broken on it."
-                        .into(),
+                    compat_tool: "proton-rtsp-11.0-20260609-2".into(),
+                    launch_options: VRC_LAUNCH_BASE.to_string(),
+                    note: "Proton RTSP 11.0 with hardware video decoding & AVPro enabled.".into(),
                 },
                 SteamProfile {
                     name: "Video comp".into(),
                     compat_tool: "GE-Proton9-25".into(),
-                    launch_options: VRC_LAUNCH_BASE.into(),
-                    note: "Older Proton-GE with working Media Foundation DLLs — \
-                           video players play on MF-MediaEngine-Hardware."
+                    launch_options:
+                        "WINEDLLOVERRIDES=\"iyuv_32=\" PRESSURE_VESSEL_IMPORT_OPENXR_1_RUNTIMES=1 PRESSURE_VESSEL_FILESYSTEMS_RW=/var/lib/flatpak/app/io.github.wivrn.wivrn %command% --enable-hw-video-decoding"
+                            .into(),
+                    note: "Older Proton-GE fallback with working Media Foundation DLLs."
                         .into(),
                 },
             ],
@@ -323,12 +327,7 @@ fn default_steam_start_command() -> String {
     "steam".to_string()
 }
 
-/// Launch options shared by both profiles: the IYUV override, WiVRn's OpenXR
-/// runtime passthrough and hardware video decoding.
-const VRC_LAUNCH_BASE: &str = "WINEDLLOVERRIDES=\"iyuv_32=\" \
-     PRESSURE_VESSEL_IMPORT_OPENXR_1_RUNTIMES=1 \
-     PRESSURE_VESSEL_FILESYSTEMS_RW=/var/lib/flatpak/app/io.github.wivrn.wivrn \
-     %command% --enable-hw-video-decoding";
+
 
 impl SteamConfig {
     /// The profile to switch to when the button is pressed, given the profile
@@ -374,11 +373,33 @@ impl Default for AudioConfig {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
+pub struct VirtualDisplayConfig {
+    /// Create a virtual 4K display when lvr starts.
+    pub create_on_startup: bool,
+    /// Create a virtual 4K display when the last remaining physical display is unplugged.
+    pub create_on_last_display_unplugged: bool,
+    /// Virtual display resolution mode (default: "3840x2160@60").
+    pub resolution: String,
+}
+
+impl Default for VirtualDisplayConfig {
+    fn default() -> Self {
+        Self {
+            create_on_startup: true,
+            create_on_last_display_unplugged: true,
+            resolution: "3840x2160@60".into(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
 pub struct Config {
     pub general: General,
     pub wivrn: WivrnConfig,
     pub audio: AudioConfig,
     pub steam: SteamConfig,
+    pub virtual_display: VirtualDisplayConfig,
     #[serde(rename = "autostart")]
     pub autostart: Vec<AutostartEntry>,
 }
@@ -390,6 +411,7 @@ impl Default for Config {
             wivrn: WivrnConfig::default(),
             audio: AudioConfig::default(),
             steam: SteamConfig::default(),
+            virtual_display: VirtualDisplayConfig::default(),
             autostart: default_entries(),
         }
     }
@@ -536,8 +558,8 @@ fn default_entries() -> Vec<AutostartEntry> {
             name: "VRCVideoCacher".into(),
             enabled: true,
             trigger: Trigger::Vrchat,
-            command: home_str("Desktop/VRCVideoCacher"),
-            working_dir: home_str("Desktop"),
+            command: "/run/media/system/Data/Games/Steam/steamapps/common/VRCVideoCacher/VRCVideoCacher".into(),
+            working_dir: "/run/media/system/Data/Games/Steam/steamapps/common/VRCVideoCacher".into(),
             console: true,
             match_patterns: vec!["vrcvideocacher".into()],
             grace_secs: 120,
@@ -551,7 +573,11 @@ fn default_entries() -> Vec<AutostartEntry> {
             command: home_str(".local/bin/vrcosc"),
             // Matches both the launcher script and the Wine-side executable,
             // without matching every path that merely mentions VRCOSC.
-            match_patterns: vec!["vrcosc.exe".into(), "/.local/bin/vrcosc".into()],
+            match_patterns: vec![
+                "VRCOSC.dll".into(),
+                "vrcosc.exe".into(),
+                "/.local/bin/vrcosc".into(),
+            ],
             grace_secs: 120,
             ..Default::default()
         },
@@ -587,6 +613,18 @@ fn default_entries() -> Vec<AutostartEntry> {
             match_patterns: vec!["/app/main/slimevr".into(), "slimevr.jar".into()],
             grace_secs: 300,
             stop_command: "flatpak kill dev.slimevr.SlimeVR".into(),
+            ..Default::default()
+        },
+        AutostartEntry {
+            id: "vrcbioupdater".into(),
+            name: "VRChatBioUpdater".into(),
+            enabled: true,
+            trigger: Trigger::Vrchat,
+            command: home_str(".local/bin/vrcbioupdater"),
+            working_dir: "/run/media/system/Data/OneDrive/Games/VRChat/_TOOLS/VRChatBioUpdater".into(),
+            console: true,
+            match_patterns: vec!["vrcbioupdater".into(), "vrchatbioupdater".into()],
+            grace_secs: 120,
             ..Default::default()
         },
         AutostartEntry {

@@ -10,6 +10,7 @@ use tokio::sync::mpsc::UnboundedReceiver;
 
 use crate::audio::{self, Kind};
 use crate::config::{AutostartEntry, Config, Trigger};
+use crate::display;
 use crate::procs::{self, ChildRegistry, ProcSnapshot, ProcessScanner};
 use crate::state::{Command, EntryStatus, Shared, Status};
 use crate::steam;
@@ -193,6 +194,8 @@ pub struct Engine {
     cached_default_sink: String,
     cached_default_source: String,
     steam: SteamState,
+    virtual_display_created: bool,
+    last_display_count: Option<usize>,
 }
 
 /// Cached Steam profile state, refreshed on a slow timer.
@@ -228,11 +231,20 @@ impl Engine {
             cached_default_sink: String::new(),
             cached_default_source: String::new(),
             steam: SteamState::default(),
+            virtual_display_created: false,
+            last_display_count: None,
         }
     }
 
     pub async fn run(mut self) {
         self.shared.info("Supervisor started");
+        if self.shared.config().virtual_display.create_on_startup {
+            let res = self.shared.config().virtual_display.resolution.clone();
+            if display::create_virtual_4k_display(&res) {
+                self.virtual_display_created = true;
+                self.shared.info("Created virtual 4K display on app startup");
+            }
+        }
         loop {
             let interval = Duration::from_millis(self.shared.config().general.poll_interval_ms);
             tokio::select! {
@@ -282,6 +294,16 @@ impl Engine {
                 self.last_audio_poll = None;
             }
             Command::SwitchSteamProfile(name) => self.switch_steam_profile(&name).await,
+            Command::CreateVirtualDisplay => {
+                let res = self.shared.config().virtual_display.resolution.clone();
+                let created = display::create_virtual_4k_display(&res);
+                if created {
+                    self.virtual_display_created = true;
+                    self.shared.info("Created virtual 4K display");
+                } else {
+                    self.shared.error("Failed to create virtual 4K display");
+                }
+            }
             Command::SaveConfig => match self.shared.save_config() {
                 Ok(()) => self
                     .shared
@@ -310,6 +332,19 @@ impl Engine {
         self.refresh_audio_cache(&config).await;
         self.refresh_steam_cache(&config);
 
+        let current_displays = display::get_connected_display_count();
+        if let Some(last_count) = self.last_display_count {
+            if last_count > 0 && current_displays == 0 && config.virtual_display.create_on_last_display_unplugged {
+                self.shared.warn("Last physical display unplugged, creating virtual 4K display...");
+                let res = config.virtual_display.resolution.clone();
+                if display::create_virtual_4k_display(&res) {
+                    self.virtual_display_created = true;
+                    self.shared.info("Virtual 4K display created on display disconnect");
+                }
+            }
+        }
+        self.last_display_count = Some(current_displays);
+
         let status = Status {
             wivrn_running: wivrn.running,
             headset_connected: wivrn.headset_connected,
@@ -327,6 +362,8 @@ impl Engine {
             steam_switching: self.steam.switching,
             sinks: self.cached_sinks.clone(),
             sources: self.cached_sources.clone(),
+            display_count: current_displays,
+            virtual_display_created: self.virtual_display_created,
             last_tick: Some(chrono::Local::now()),
         };
         self.shared.set_status(status);
@@ -1031,6 +1068,8 @@ pub async fn probe(config: &Config) -> Status {
         steam_switching: false,
         sinks: audio::list_devices(Kind::Sink).await.unwrap_or_default(),
         sources: audio::list_devices(Kind::Source).await.unwrap_or_default(),
+        display_count: display::get_connected_display_count(),
+        virtual_display_created: false,
         last_tick: Some(chrono::Local::now()),
     }
 }

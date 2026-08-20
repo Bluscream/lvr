@@ -81,6 +81,12 @@ fn status_row(app: &LvrApp, ui: &mut Ui) {
                 widgets::on_off(status.session_running),
             );
         }
+        widgets::pill(
+            ui,
+            "Displays",
+            &format!("{} active", status.display_count),
+            if status.display_count > 0 { GREEN } else { ORANGE },
+        );
         if let Some(profile) = &status.steam_profile {
             widgets::pill(ui, "VRC Proton", profile, BLUE);
         } else if !status.steam_compat_tool.is_empty() {
@@ -134,6 +140,9 @@ fn actions(app: &mut LvrApp, ui: &mut Ui) {
             for id in ids {
                 app.shared.send(Command::StartEntry(id));
             }
+        }
+        if widgets::big_button(ui, "Create 4K Display", Some(BLUE), button_width).clicked() {
+            app.shared.send(Command::CreateVirtualDisplay);
         }
         if widgets::big_button(ui, "Stop everything VR", Some(RED), button_width).clicked() {
             app.request_stop_all();
