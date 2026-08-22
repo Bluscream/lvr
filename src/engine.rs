@@ -33,10 +33,17 @@ pub struct EntryRuntime {
     pub suppressed: bool,
     /// Already launched during the current trigger activation.
     pub launched_this_cycle: bool,
-    /// The trigger has been active at least once since `lvr` started.
+    /// A trigger activation is still awaiting its shutdown.
     ///
-    /// Until then the grace timer stays disarmed, so starting `lvr` while an
-    /// app happens to be running never kills something we did not start.
+    /// Set when the trigger goes active, cleared once the entry has actually been
+    /// stopped — or once it is seen not running while the trigger is off, which
+    /// completes the cycle just as well.
+    ///
+    /// Only an armed entry gets a grace timer, so the countdown belongs to the
+    /// activation that ended rather than to the mere fact that the trigger is off.
+    /// Without the clear, one VRChat session armed the entry for the rest of the
+    /// `lvr` process's life and every manual start hours later was reaped 120
+    /// seconds in.
     pub armed: bool,
     pub stop_at: Option<Instant>,
     pub start_at: Option<Instant>,
@@ -116,12 +123,16 @@ impl EntryRuntime {
             self.start_at = None;
 
             if !input.running {
+                // Nothing left to stop, so the activation is finished. Disarming here is
+                // what makes a later manual start — with the trigger still off — something
+                // this entry leaves alone.
                 self.stop_at = None;
+                self.armed = false;
                 return Action::None;
             }
             if !self.armed {
-                // It was already running before we ever saw its trigger, so it
-                // is not ours to stop.
+                // Running without an activation behind it: started by hand, or already up
+                // before we ever saw the trigger. Not ours to stop.
                 self.stop_at = None;
                 return Action::None;
             }
@@ -134,10 +145,12 @@ impl EntryRuntime {
                 Some(at) if input.now < at => Action::None,
                 Some(_) => {
                     self.stop_at = None;
+                    self.armed = false;
                     Action::Stop
                 }
                 None => {
                     if entry.grace_secs == 0 {
+                        self.armed = false;
                         Action::Stop
                     } else {
                         self.stop_at =
@@ -1424,6 +1437,100 @@ mod tests {
         assert_eq!(
             EntryRuntime::seconds_until(Some(now - Duration::from_secs(42)), now),
             Some(0)
+        );
+    }
+
+    /// The bug this guards: one VRChat session armed the entry, `armed` was never
+    /// cleared, and every manual start for the rest of the process's life was reaped
+    /// 120 seconds later. The grace period belongs to a VRChat session that ended, not
+    /// to the standing fact that VRChat is closed.
+    #[test]
+    fn manual_start_long_after_vrchat_closed_is_left_alone() {
+        let entry = entry();
+        let mut runtime = EntryRuntime::default();
+        let t0 = Instant::now();
+
+        // A VRChat session earlier in the day.
+        runtime.plan(&entry, input(true, true, t0));
+
+        // VRChat closes; the grace period runs and the entry is stopped.
+        runtime.plan(&entry, input(false, true, t0));
+        let after_grace = t0 + Duration::from_secs(121);
+        assert_eq!(runtime.plan(&entry, input(false, true, after_grace)), Action::Stop);
+
+        // It is gone.
+        runtime.plan(&entry, input(false, false, after_grace));
+
+        // Hours later, started by hand with VRChat still closed. No new session ended,
+        // so nothing should be scheduled.
+        let much_later = after_grace + Duration::from_secs(10_000);
+        assert_eq!(runtime.plan(&entry, input(false, true, much_later)), Action::None);
+        assert_eq!(runtime.stop_at, None);
+
+        let later_still = much_later + Duration::from_secs(600);
+        assert_eq!(runtime.plan(&entry, input(false, true, later_still)), Action::None);
+    }
+
+    #[test]
+    fn a_new_vrchat_session_rearms_the_grace_period() {
+        let entry = entry();
+        let mut runtime = EntryRuntime::default();
+        let t0 = Instant::now();
+
+        runtime.plan(&entry, input(true, true, t0));
+        runtime.plan(&entry, input(false, true, t0));
+        let after_grace = t0 + Duration::from_secs(121);
+        assert_eq!(runtime.plan(&entry, input(false, true, after_grace)), Action::Stop);
+        runtime.plan(&entry, input(false, false, after_grace));
+
+        // VRChat runs again — the entry is live once more and must be reaped again when
+        // that session ends. Disarming must not become "never stop again".
+        let t1 = after_grace + Duration::from_secs(3_600);
+        runtime.plan(&entry, input(true, true, t1));
+        assert_eq!(runtime.plan(&entry, input(false, true, t1)), Action::None);
+        assert_eq!(
+            runtime.plan(&entry, input(false, true, t1 + Duration::from_secs(121))),
+            Action::Stop
+        );
+    }
+
+    #[test]
+    fn an_entry_that_exits_on_its_own_during_grace_does_not_stay_armed() {
+        let entry = entry();
+        let mut runtime = EntryRuntime::default();
+        let t0 = Instant::now();
+
+        runtime.plan(&entry, input(true, true, t0));
+        runtime.plan(&entry, input(false, true, t0));
+        assert!(runtime.stop_at.is_some());
+
+        // Closed by hand before the grace period expired: the cycle is over.
+        runtime.plan(&entry, input(false, false, t0 + Duration::from_secs(5)));
+        assert_eq!(runtime.stop_at, None);
+
+        // So bringing it back up manually is not a reason to stop it.
+        assert_eq!(
+            runtime.plan(&entry, input(false, true, t0 + Duration::from_secs(10))),
+            Action::None
+        );
+        assert_eq!(runtime.stop_at, None);
+    }
+
+    #[test]
+    fn a_zero_grace_stop_also_disarms() {
+        let mut entry = entry();
+        entry.grace_secs = 0;
+        let mut runtime = EntryRuntime::default();
+        let t0 = Instant::now();
+
+        runtime.plan(&entry, input(true, true, t0));
+        assert_eq!(runtime.plan(&entry, input(false, true, t0)), Action::Stop);
+        runtime.plan(&entry, input(false, false, t0));
+
+        // Immediate-stop entries must not reap a later manual start either.
+        assert_eq!(
+            runtime.plan(&entry, input(false, true, t0 + Duration::from_secs(60))),
+            Action::None
         );
     }
 }
