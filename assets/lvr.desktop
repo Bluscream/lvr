@@ -11,6 +11,8 @@ Keywords=VR;WiVRn;OpenXR;VRChat;SteamVR;
 StartupNotify=false
 StartupWMClass=lvr
 SingleMainWindow=true
+X-GNOME-Autostart-enabled=true
+X-KDE-autostart-after=panel
 Actions=Dashboard;Logs;AudioVR;AudioDesktop;
 
 [Desktop Action Dashboard]

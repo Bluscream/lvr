@@ -12,6 +12,7 @@ egui = "0.36"
 egui_extras = "0.36.1"
 ksni = { version = "0.3.6", features = ["tokio"] }
 libc = "0.2.189"
+reqwest = { version = "0.13.4", default-features = false, features = ["rustls"] }
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.140"
 shell-words = "1.1.1"

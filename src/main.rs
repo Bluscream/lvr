@@ -13,6 +13,7 @@ mod state;
 mod steam;
 mod tray;
 mod ui;
+mod domain_block;
 mod wivrn;
 
 use std::path::PathBuf;
@@ -182,6 +183,8 @@ fn main() -> Result<()> {
         }
     };
 
+    ensure_display_environment();
+
     let start_hidden = args.hidden.unwrap_or(config.general.start_hidden);
     let (shared, rx) = Shared::new(config, config_path.clone());
     shared.info(format!("Config: {}", config_path.display()));
@@ -197,7 +200,7 @@ fn main() -> Result<()> {
             .with_title("LinuxVR")
             .with_app_id("lvr")
             .with_inner_size([1120.0, 760.0])
-            .with_min_inner_size([720.0, 520.0])
+            .with_min_inner_size([400.0, 320.0])
             .with_icon(icon::window_icon())
             .with_visible(!start_hidden),
         persist_window: false,
@@ -279,6 +282,76 @@ fn spawn_worker(
         })
         .context("spawning the supervisor thread")?;
     Ok(Worker { handle, done })
+}
+
+/// Ensure WAYLAND_DISPLAY and/or DISPLAY are set and available before initializing UI.
+/// If started early by systemd/autostart before the compositor socket is published or exported,
+/// this probes the runtime directories and waits briefly for the display socket to become ready.
+fn ensure_display_environment() {
+    let runtime_dir = std::env::var("XDG_RUNTIME_DIR").unwrap_or_else(|_| {
+        let uid = unsafe { libc::getuid() };
+        let default_path = format!("/run/user/{uid}");
+        unsafe {
+            std::env::set_var("XDG_RUNTIME_DIR", &default_path);
+        }
+        default_path
+    });
+
+    let runtime_path = std::path::PathBuf::from(&runtime_dir);
+
+    // Wait up to 15 seconds (75 iterations * 200ms) for display socket to appear
+    for _ in 0..75 {
+        // If WAYLAND_DISPLAY is already set, check if the socket exists
+        if let Ok(wayland_display) = std::env::var("WAYLAND_DISPLAY") {
+            if runtime_path.join(&wayland_display).exists() {
+                return;
+            }
+        }
+
+        // If DISPLAY is already set, check if the X11 socket exists
+        if let Ok(display_var) = std::env::var("DISPLAY") {
+            let num = display_var.trim_start_matches(':').split('.').next().unwrap_or("0");
+            if std::path::Path::new(&format!("/tmp/.X11-unix/X{num}")).exists() {
+                return;
+            }
+        }
+
+        // Check for wayland sockets in XDG_RUNTIME_DIR
+        for candidate in ["wayland-0", "wayland-1", "wayland-2"] {
+            let socket_path = runtime_path.join(candidate);
+            if socket_path.exists() {
+                unsafe {
+                    std::env::set_var("WAYLAND_DISPLAY", candidate);
+                }
+                tracing::info!("Discovered and set WAYLAND_DISPLAY={candidate}");
+                return;
+            }
+        }
+
+        // Check for X11 sockets in /tmp/.X11-unix/
+        for display_num in [0, 1, 2] {
+            let x11_socket = format!("/tmp/.X11-unix/X{display_num}");
+            if std::path::Path::new(&x11_socket).exists() {
+                let disp = format!(":{display_num}");
+                unsafe {
+                    std::env::set_var("DISPLAY", &disp);
+                }
+                tracing::info!("Discovered and set DISPLAY={disp}");
+                return;
+            }
+        }
+
+        std::thread::sleep(Duration::from_millis(200));
+    }
+
+    // Fallback: set defaults anyway if nothing found after timeout
+    if std::env::var("WAYLAND_DISPLAY").is_err() && std::env::var("DISPLAY").is_err() {
+        unsafe {
+            std::env::set_var("WAYLAND_DISPLAY", "wayland-0");
+            std::env::set_var("DISPLAY", ":0");
+        }
+        tracing::warn!("Display socket not detected; defaulted WAYLAND_DISPLAY=wayland-0, DISPLAY=:0");
+    }
 }
 
 fn init_logging() {

@@ -1,0 +1,1193 @@
+{
+  "CampaignStatus": "Disabled",
+  "DisableBackgroundPreloads": true,
+  "LocationGiftingNonSubPrioEnabled": true,
+  "VoiceEnableDegradation": false,
+  "VoiceEnableReceiverLimiting": true,
+  "accessLogsUrls": {
+    "Default": "https://help.vrchat.com/hc/en-us/articles/9521522810899-Where-do-I-find-my-output-logs#h_01HT1ZV67JGKX5AE4R1P28XMXR",
+    "Pico": "https://help.vrchat.com/hc/en-us/articles/9521522810899-Where-do-I-find-my-output-logs#h_01HT1ZV67JGKX5AE4R1P28XMXR",
+    "Quest": "https://help.vrchat.com/hc/en-us/articles/9521522810899-Where-do-I-find-my-output-logs#h_01HT1ZV67JGKX5AE4R1P28XMXR",
+    "XRElite": "https://help.vrchat.com/hc/en-us/articles/9521522810899-Where-do-I-find-my-output-logs#h_01HT1ZV67JGKX5AE4R1P28XMXR"
+  },
+  "address": "1062 Folsom St., Suite 200, San Francisco, CA, 94103",
+  "ageVerificationInviteVisible": true,
+  "ageVerificationP": true,
+  "ageVerificationStatusVisible": true,
+  "analysisMaxRetries": 14,
+  "analysisRetryInterval": 4000,
+  "analyticsSegment_NewUI_PctOfUsers": 2,
+  "analyticsSegment_NewUI_Salt": "0d8522abac334287830d1192a8605f39",
+  "announcements": [],
+  "arrayEspresso": "bytesSearchBuildJsonMerge",
+  "audioConfig": {
+    "eq": 0.42,
+    "nearFieldILDNudge": 15,
+    "nearFieldILDNudgeDistance": 2,
+    "nearFieldILDNudgeEarRadius": 0.07,
+    "nearFieldILDNudgeEarTranslate": -0.05,
+    "perEarDirectionalityEarRadius": 0.07,
+    "perEarDirectionalityFadeDistance": 1.75,
+    "perEarDirectionalityMaxScale": 1.5,
+    "perEarDirectionalityPCFactor": 0.5,
+    "trackingScaleMax": 1.8,
+    "trackingScaleMin": 0.2,
+    "trackingScaleMultiplier": 0.75,
+    "useLegacyILDNudging": false
+  },
+  "availableLanguageCodes": [
+    "en",
+    "fr",
+    "es",
+    "it",
+    "ko",
+    "de",
+    "ja",
+    "pl",
+    "ru",
+    "pt-BR",
+    "zh-CN",
+    "zh-HK",
+    "he",
+    "tok",
+    "uk",
+    "th"
+  ],
+  "availableLanguages": [
+    "English",
+    "French",
+    "Spanish",
+    "Italian",
+    "Korean",
+    "German",
+    "Japanese",
+    "Polish",
+    "Russian",
+    "Portuguese, Brazilian",
+    "Chinese Simplified",
+    "Thai"
+  ],
+  "avatarPerfLimiter": {
+    "AndroidMobile": {
+      "maxSeats": 4
+    },
+    "PC": {
+      "maxSeats": -1
+    },
+    "Pico": {
+      "maxSeats": -1
+    },
+    "Quest": {
+      "maxSeats": -1
+    },
+    "XRElite": {
+      "maxSeats": -1
+    },
+    "iOSMobile": {
+      "maxSeats": 4
+    }
+  },
+  "chatboxLogBufferSeconds": 45,
+  "clientApiKey": "JlE5Jldo5Jibnk5O5hTx6XVqsJu4WJ26",
+  "clientBPSCeiling": 18432,
+  "clientDisconnectTimeout": 30000,
+  "clientMaxDatagrams": 20,
+  "clientNetDispatchThread": true,
+  "clientNetDispatchThreadMobile": true,
+  "clientQR": 1,
+  "clientReservedPlayerBPS": 7168,
+  "clientSentCountAllowance": 100,
+  "clientUseAck2": true,
+  "constants": {
+    "GROUPS": {
+      "CAPACITY": 200000,
+      "GROUP_TRANSFER_REQUIREMENTS": [
+        "hasVerifiedEmail",
+        "targetCanOwnMoreGroups",
+        "targetIsGroupMember",
+        "hasVRCPlus",
+        "groupNotMonetized"
+      ],
+      "MAX_INVITES_REQUESTS": 50,
+      "MAX_JOINED": 100,
+      "MAX_JOINED_PLUS": 200,
+      "MAX_LANGUAGES": 10,
+      "MAX_LINKS": 3,
+      "MAX_MANAGEMENT_ROLES": 10,
+      "MAX_OWNED": 5,
+      "MAX_ROLES": 50
+    },
+    "INSTANCE": {
+      "POPULATION_BRACKETS": {
+        "CROWDED": {
+          "max": 80,
+          "min": 20
+        },
+        "FEW": {
+          "max": 5,
+          "min": 1
+        },
+        "MANY": {
+          "max": 20,
+          "min": 6
+        }
+      }
+    },
+    "LANGUAGE": {
+      "SPOKEN_LANGUAGE_OPTIONS": {
+        "afr": "Afrikaans",
+        "ara": "العربية",
+        "ase": "American Sign Language",
+        "asf": "Auslan (Australian Sign Language)",
+        "ben": "বাংলা",
+        "bfi": "British Sign Language",
+        "bul": "български",
+        "ces": "Čeština",
+        "cmn": "官话",
+        "cym": "Cymraeg",
+        "dan": "Dansk",
+        "deu": "Deutsch",
+        "dse": "Nederlandse Gebarentaal",
+        "ell": "Ελληνικά",
+        "eng": "English",
+        "epo": "Esperanto",
+        "est": "eesti",
+        "fil": "Filipino",
+        "fin": "Suomi",
+        "fra": "Français",
+        "fsl": "langue des signes française",
+        "gla": "Gàidhlig",
+        "gle": "Gaeilge",
+        "gsg": "Deutsche Gebärdensprache",
+        "heb": "עברית",
+        "hin": "हिन्दी",
+        "hmn": "Hmoob",
+        "hrv": "hrvatski",
+        "hun": "Magyar",
+        "hye": "հայերեն",
+        "ind": "Bahasa Indonesia",
+        "isl": "íslenska",
+        "ita": "Italiano",
+        "jpn": "日本語",
+        "jsl": "日本手話",
+        "kor": "한국어",
+        "kvk": "한국 수화 언어",
+        "lav": "Latviešu",
+        "lit": "lietuvių",
+        "ltz": "Lëtzebuergesch",
+        "mar": "मराठी",
+        "mkd": "македонски",
+        "mlt": "Malti",
+        "mri": "Māori",
+        "msa": "Bahasa Melayu",
+        "nld": "Nederlands",
+        "nor": "Norsk",
+        "nzs": "New Zealand Sign Language",
+        "pol": "Polski",
+        "por": "Português",
+        "ron": "Română",
+        "rus": "Русский",
+        "sco": "Scots",
+        "slk": "slovenčina",
+        "slv": "slovenščina",
+        "spa": "Español",
+        "swe": "Svenska",
+        "tel": "తెలుగు",
+        "tha": "ภาษาไทย",
+        "tok": "toki pona",
+        "tur": "Türkçe",
+        "tws": "潮州話",
+        "ukr": "украї́нська",
+        "vie": "Tiếng Việt",
+        "wuu": "吳語",
+        "yue": "廣東話",
+        "zho": "中文",
+        "zxx": "No linguistic content"
+      }
+    }
+  },
+  "contactEmail": "hello@vrchat.com",
+  "copyrightEmail": "copyright@vrchat.com",
+  "copyrightFormUrl": "https://vrchat.com/home/profile?dmcaClaimForm=true&dmcaTarget={reportedId}",
+  "currentPrivacyVersion": 2,
+  "currentTOSVersion": 12,
+  "defaultAvatar": "avtr_c38a1615-5bf5-42b4-84eb-a8b6c37cbd11",
+  "defaultStickerSet": "Default",
+  "devLanguageCodes": [
+    "sv",
+    "nl",
+    "uk",
+    "pl",
+    "da",
+    "no",
+    "th",
+    "fi",
+    "hu",
+    "cs",
+    "tr",
+    "ar",
+    "ro",
+    "vi",
+    "id"
+  ],
+  "devSdkUrl": "https://vrchat.com/home/download",
+  "devSdkVersion": "2020.09.25.00.08",
+  "dis-countdown": "2025-12-02T08:00:00.000Z",
+  "disableAVProInProton": false,
+  "disableAvatarCopying": false,
+  "disableAvatarGating": false,
+  "disableCaptcha": true,
+  "disableCommunityLabs": false,
+  "disableCommunityLabsPromotion": false,
+  "disableEmail": false,
+  "disableEventStream": false,
+  "disableFeedbackGating": false,
+  "disableFrontendBuilds": false,
+  "disableGiftDrops": false,
+  "disableHello": false,
+  "disableOculusSubs": false,
+  "disableRegistration": false,
+  "disableSteamNetworking": true,
+  "disableTwoFactorAuth": false,
+  "disableUdon": false,
+  "disableUpgradeAccount": false,
+  "downloadLinkWindows": "https://www.oculus.com/experiences/rift/997678176960598/",
+  "downloadUrls": {
+    "bootstrap": "https://github.com/vrchat/packages/releases/download/resolvers/latest-resolver.unitypackage",
+    "sdk2": "https://assets.vrchat.com/sdk/VRCSDK2-2022.04.20.16.27_Public.unitypackage",
+    "sdk3-avatars": "https://assets.vrchat.com/sdk/VRChat-Avatars-3.10.5.unitypackage",
+    "sdk3-worlds": "https://assets.vrchat.com/sdk/VRChat-Worlds-3.10.5.unitypackage",
+    "vcc": "https://vrcpm.vrchat.cloud/vcc/Builds/2.4.5/VRChat_CreatorCompanion_Setup_2.4.5.exe"
+  },
+  "dwellBackoffSchedule": [
+    60,
+    120,
+    300,
+    600,
+    1800
+  ],
+  "dynamicWorldRows": [
+    {
+      "index": 1,
+      "name": "Hot",
+      "platform": "ThisPlatformSupported",
+      "sortHeading": "heat",
+      "sortOrder": "descending",
+      "sortOwnership": "any"
+    },
+    {
+      "index": 2,
+      "name": "Spotlight - PC",
+      "platform": "ThisPlatformSupported",
+      "sortHeading": "updated",
+      "sortOrder": "descending",
+      "sortOwnership": "any",
+      "tag": "admin_spotlight_pc"
+    },
+    {
+      "index": 3,
+      "name": "Spotlight - Cross Platform",
+      "platform": "ThisPlatformSupported",
+      "sortHeading": "updated",
+      "sortOrder": "descending",
+      "sortOwnership": "any",
+      "tag": "admin_spotlight_xplat"
+    },
+    {
+      "index": 4,
+      "name": "Community Labs",
+      "platform": "ThisPlatformSupported",
+      "sortHeading": "labs",
+      "sortOrder": "descending",
+      "sortOwnership": "any"
+    },
+    {
+      "index": 5,
+      "name": "Active - Cross Platform",
+      "platform": "AllPlatforms",
+      "sortHeading": "active",
+      "sortOrder": "descending",
+      "sortOwnership": "any"
+    },
+    {
+      "index": 6,
+      "name": "Active - My Platform",
+      "platform": "ThisPlatformOnly",
+      "sortHeading": "active",
+      "sortOrder": "descending",
+      "sortOwnership": "any"
+    },
+    {
+      "index": 7,
+      "name": "Random",
+      "platform": "ThisPlatformSupported",
+      "sortHeading": "shuffle",
+      "sortOrder": "descending",
+      "sortOwnership": "any"
+    },
+    {
+      "index": 8,
+      "name": "Avatar Worlds",
+      "platform": "ThisPlatformSupported",
+      "sortHeading": "heat",
+      "sortOrder": "descending",
+      "sortOwnership": "any",
+      "tag": "author_tag_avatar"
+    },
+    {
+      "index": 9,
+      "name": "Games",
+      "platform": "ThisPlatformSupported",
+      "sortHeading": "heat",
+      "sortOrder": "descending",
+      "sortOwnership": "any",
+      "tag": "author_tag_game"
+    },
+    {
+      "index": 10,
+      "name": "Updated Recently",
+      "platform": "ThisPlatformSupported",
+      "sortHeading": "updated",
+      "sortOrder": "descending",
+      "sortOwnership": "any"
+    },
+    {
+      "index": 11,
+      "name": "New",
+      "platform": "ThisPlatformSupported",
+      "sortHeading": "publication",
+      "sortOrder": "descending",
+      "sortOwnership": "any"
+    },
+    {
+      "index": 12,
+      "name": "Recent",
+      "platform": "ThisPlatformSupported",
+      "sortHeading": "recent",
+      "sortOrder": "descending",
+      "sortOwnership": "any"
+    },
+    {
+      "index": 13,
+      "name": "Mine",
+      "platform": "any",
+      "sortHeading": "updated",
+      "sortOrder": "descending",
+      "sortOwnership": "mine"
+    },
+    {
+      "index": 14,
+      "name": "Classics",
+      "platform": "ThisPlatformSupported",
+      "sortHeading": "trending",
+      "sortOrder": "descending",
+      "sortOwnership": "any"
+    }
+  ],
+  "economyLedgerMode": "internal",
+  "economyPauseEnd": "2026-08-06T17:00:00.000+0000",
+  "economyPauseStart": "2026-08-06T16:00:00.000+0000",
+  "economyPurchaseRepairEnabled": true,
+  "economyState": 1,
+  "enableVRCPlusWorldLists": true,
+  "eventShelfCampaigns": [
+    {
+      "key": "group_fair",
+      "name": "Group Fair"
+    },
+    {
+      "description": "Include this event in the VRChat Tanabata event shelf. This will make it discoverable to users browsing events during Tanabata.",
+      "key": "tanabata",
+      "name": "Tanabata Homeworld Moderation"
+    }
+  ],
+  "events": {
+    "distanceClose": 2,
+    "distanceFactor": 100,
+    "distanceFar": 80,
+    "groupDistance": 3,
+    "maximumBunchSize": 247,
+    "notVisibleFactor": 100,
+    "playerOrderBucketSize": 5,
+    "playerOrderFactor": 55,
+    "slowUpdateFactorThreshold": 25,
+    "useDirectPlayerSerialization": true,
+    "useSparseRotationForPlayerSerialization": true,
+    "viewSegmentLength": 5
+  },
+  "forceUseLatestWorld": true,
+  "generatorPublicCaptcha": 0.3557001549234631,
+  "giftDisplayType": "Default",
+  "globalCacheVersion": 2,
+  "globalCacheVersionDefault": 1,
+  "googleApiClientId": "827942544393-r2ouvckvouldn9dg9uruseje575e878f.apps.googleusercontent.com",
+  "googleApiUnityClientId": "827942544393-1v9qkntpb02utrps5oc1mjm0btb57b0f.apps.googleusercontent.com",
+  "heightTimeoutMap": {},
+  "homeWorldId": "wrld_4432ea9b-729c-46e3-8eaf-846aa0a37fdd",
+  "homepageRedirectTarget": "https://hello.vrchat.com",
+  "hubWorldId": "wrld_ba913a96-fac4-4048-a062-9aa5db092812",
+  "imageHostUrlList": [
+    "assets.vrchat.com",
+    "i.imgur.com",
+    "pbs.twimg.com",
+    "i.redd.it",
+    "images2.imgbox.com",
+    "i.ibb.co",
+    "i.postimg.cc",
+    "images4.imagebam.com",
+    "dl.dropbox.com",
+    "*.github.io",
+    "*.xr-marketplace.com",
+    "*.uroom.online",
+    "*.v-market.work",
+    "*.vket.chat",
+    "*.poly.jp",
+    "*.vazar.jp",
+    "*.catsudon.net",
+    "dl.dropboxusercontent.com",
+    "i.ytimg.com",
+    "*.vazarapi.com",
+    "ciel.topaz.chat",
+    "vr-static.anique.jp",
+    "*.vrcdn.cloud",
+    "virtualokinawa-on-demand.contents.work",
+    "*.disbridge.com",
+    "*.virtualokinawa-on-demand.contents.work",
+    "*.yizmarkia.com",
+    "*.sa-vrc-media.com",
+    "*.gugenka-media.com",
+    "*.nci-system.com",
+    "*.v-inc.jp",
+    "*.gugenka-media.jp",
+    "cdn.furality.org",
+    "vrc-live-sync-api.infrastructure-517.workers.dev"
+  ],
+  "immunityHeaderGitEvents": "TrendThunderAuthenticationLabelOwnership",
+  "iosAppVersion": [
+    "TestFlight:1365"
+  ],
+  "iosVersion": {
+    "major": 26,
+    "minor": 6
+  },
+  "jobsEmail": "jobs@vrchat.com",
+  "justifyProfileCountryTimeout": false,
+  "justifyRankEntryBulk": 1,
+  "labelSubscriberGenerator": 0,
+  "loadingScreenWeights": {
+    "general": {
+      "announcement": 1,
+      "informational": 89,
+      "promotional": 10
+    },
+    "newUsers": {
+      "announcement": 1,
+      "informational": 89,
+      "promotional": 10
+    },
+    "nonVrcPlus": {
+      "announcement": 1,
+      "informational": 89,
+      "promotional": 10
+    },
+    "vrcPlus": {
+      "announcement": 1,
+      "informational": 89,
+      "promotional": 10
+    }
+  },
+  "localizedInstanceExcludedLanguageCodes": [
+    "en"
+  ],
+  "loopNewsPhotonLoggingWeight": {},
+  "lowMemoryGoHomeTimeout": {
+    "AndroidMobile": {
+      "timeout": -1
+    },
+    "Pico": {
+      "timeout": -1
+    },
+    "Quest": {
+      "timeout": -1
+    },
+    "XRElite": {
+      "timeout": -1
+    },
+    "iOSMobile": {
+      "timeout": -1
+    }
+  },
+  "maxUserEmoji": 18,
+  "maxUserStickers": 18,
+  "maximumUnityVersionForUploads": "2023.0.0f0",
+  "minSupportedClientBuildNumber": {
+    "AppStore": {
+      "minBuildNumber": 1865,
+      "redirectionAddress": "itms-apps://itunes.apple.com/app/id6448578770"
+    },
+    "Default": {
+      "minBuildNumber": 1865
+    },
+    "Firebase": {
+      "minBuildNumber": 1865,
+      "redirectionAddress": "https://console.firebase.google.com/project/crashlytics-dd775/appdistribution/app/android:com.vrchat.mobile/releases"
+    },
+    "FirebaseiOS": {
+      "minBuildNumber": 1865,
+      "redirectionAddress": "https://appdistribution.firebase.google.com/testerapps/1:550279617435:ios:830f6a727c464b7cd1df3e"
+    },
+    "GooglePlay": {
+      "minBuildNumber": 1865,
+      "redirectionAddress": "https://play.google.com/store/apps/details?id=com.vrchat.mobile.playstore"
+    },
+    "PC": {
+      "minBuildNumber": 1865,
+      "redirectionAddress": "steam://nav/games/details/438100"
+    },
+    "PicoStore": {
+      "minBuildNumber": 1865,
+      "redirectionAddress": "com.picovr.store"
+    },
+    "QuestStore": {
+      "minBuildNumber": 1865,
+      "redirectionAddress": "https://www.meta.com/experiences/1856672347794301/"
+    },
+    "TestFlight": {
+      "minBuildNumber": 1865,
+      "redirectionAddress": "https://beta.itunes.apple.com/v1/app/6448578770"
+    },
+    "XRElite": {
+      "minBuildNumber": 1865,
+      "redirectionAddress": "com.htc.viveport.store"
+    }
+  },
+  "minimumUnityVersionForUploads": "2019.0.0",
+  "moderationEmail": "moderation@vrchat.com",
+  "ninkilim": false,
+  "notAllowedToSelectAvatarInPrivateWorldMessage": "For security reasons, you're not yet allowed to select avatars in private worlds or upload content. Please continue to enjoy VRChat and we'll message you when you've been unlocked. Thanks and have fun!",
+  "offlineAnalysis": {
+    "android": true,
+    "standalonewindows": true
+  },
+  "photonNameserverOverrides": [
+    "ns.photonengine.io"
+  ],
+  "photonPublicKeys": [
+    "00D4590DE9871B0EDC2DDA1281D6E6B5FC858C624F2D0960F2731D361F3123D8F56B65391E0A1F1881DBE94024C231A9183B7F7D9B66FEB81C853BF46114BCA6A4B702D7CBF088B883626A3A8239A53AC2CC6683B65AA209DD0769E43B722483A1233DDFE47BBF7520B0369E6501CCF3D3139EB3A34B800ABB821937C7E00802E204DA0A932CE28FE05D07D9F23490CA7E9A5B40073AC809AFBFAAEC5899B7EC6242993859467ACB41F991C664BF84D54EA7C2DEC05B55B306AB0FD30F43E4EE7E793E3E7DF3671B3632921D7D7676A6351E95213E35A7DB9F42506EF7D1BE15A7DEF06FB255678BD0A847568C862695B42339A57A37351CA60C658012CBBC4949",
+    "008DDEAEF95DD494796D7D6854743446E63ABF12E666ECCCCDEF4303CAC8B1A6C8A3219FCD6966492733DB81E79FD29247C0687EA195B1CAD6D7E5D1EB112696A59558931B839CD04811D22FD87C328BC9E812ECDEF03DC7A6F5921CC503502EAA73245562E443ABD6ED4CA43315D4B25729ADC758EAC6EBAB93C7279F6BD8D108FECAD18E8BEC0437B64988F177A19CFE54BF7A14DDF81D25C5CB01E0C511E56C4EBCB2AF47CA4D3C8950D2957D2E28788FE867696C8BF0E5FC07DDC8414FEFCBADDE4FC2E5D963C7C8FD349649EAB9F64BF09CAC6D7ABEBCF91A3EE7B93D9351998530CC295C0A106F3F470A9BE14DB6FF397439D4E75EF5D68D16B0108CFAF3"
+  ],
+  "player-url-resolver-sha1": "0E-00-B7-58-A7-5C-DD-A2-B1-31-C0-02-A3-F3-5D-6E-87-80-DD-42",
+  "player-url-resolver-sha1-gfn-override": "C4-F9-51-54-C6-C1-6C-9A-BA-2A-52-55-5A-54-99-82-F7-D1-4B-25",
+  "player-url-resolver-version": "2026-08-19",
+  "player-url-resolver-version-gfn-override": "2026-08-19-GFN",
+  "profileDefaults": {
+    "backgroundGradientBottom": "9933FF",
+    "backgroundGradientTop": "00C48A",
+    "themeButtonColor": "009599",
+    "themeIconColor": "6BE4FA",
+    "themeSubtextColor": "A9A9A9"
+  },
+  "propComponentList": [
+    "VRC.SDK3.Components.VRCMirrorReflection"
+  ],
+  "publicKey": "3082020A0282020100C55EDDD938B4B8462C83DF860F137B47C79FCE0F45FF9BFABD37C897C60E4AAEECFD8D919C325783BC0898A60770953A72CADEC36A9252D570BD401FD4DAC9017F209A5C753E17764B5A44419F06952DDAB1A28505DEF14F9376E8714245DF73FF4299D108A7AD64F4F7CC3ED13EAC0677F7DE73E87DEC62B73CC631AD712BB0D3E565F96FD5D812C3146F1CEFFD9C4108A865F955A2D4A5474C0983EA4D709195BCB08E857E660C266F380299F52B5E154E1F4C76837488AE1B1127850365BE32F593216B0E10144178B5AD6500FA439BD6DE623EE4C62D9C0DBAE7B4C0ACA627CAC8CAD9FFBB8AA6D0990F322B8791D19185775DF1F2ED50895429E9178E34E711B652BB897DF19A569DA3CB1383ED25C82A8AF4943E23F7ECAE46F6A6B94AF50B42042D78BF33E30E0CF3B40E70E40F907800FBF22C1C218895098C165E523943D84763C82662F798BD2F09C445404934E31E5449C054228A421C8D77CBD527B63BE6E85D2F0E48A6836F58416E042C31D982641DC70B89D3821CE35512C5105FFEFA44F8502121129E60D9D43914036827015338153CF5B8474948C1B40B97818467F7D8745A0340CC674BEAAAFD9514FB5D7F8A3080FAA6A195DC16B437E9C210D881099FD6FADD25C8844213170C5BCEEAE19755504B99C7C95F7602A72F2D3FBD2E70415BD519F39F3D17B32CC96F6964015FCA451B4DE74C0DC7A6A50203010001",
+  "publicTimer": -9575,
+  "questMinimumLowMemoryThreshold": {
+    "default": 536870912
+  },
+  "reportCategories": {
+    "announcement": {
+      "order": 21,
+      "text": "Announcement",
+      "tooltip": "The title or text of an announcement from a user"
+    },
+    "avatar": {
+      "description": "Issues with clothing, body, expressions, or accessories.",
+      "order": 6,
+      "text": "Avatar",
+      "title": "Inappropriate avatar content",
+      "tooltip": "The avatar contains objectionable content"
+    },
+    "avatarpage": {
+      "description": "Problems with images or text displayed on the avatar page.",
+      "order": 7,
+      "text": "Avatar Page",
+      "title": "Incorrect or inappropriate information on avatar page",
+      "tooltip": "The avatar page contains objectionable content"
+    },
+    "behavior": {
+      "order": 1,
+      "text": "Behavior",
+      "tooltip": "A user's words or actions contain harmful or malicious intent"
+    },
+    "chat": {
+      "order": 2,
+      "text": "Text Chat",
+      "tooltip": "The user's text chat messages contain objectionable content"
+    },
+    "content": {
+      "ipsArticle": "ips_92a821be-eff9-402c-9260-9b2c5d7784db",
+      "order": 5,
+      "text": "Reporting content (e.g. stickers, etc.)",
+      "tooltip": "How to report user-generated content"
+    },
+    "emoji": {
+      "order": 9,
+      "text": "Emoji",
+      "tooltip": "The user's custom emoji contains objectionable content"
+    },
+    "event": {
+      "order": 20,
+      "text": "Event",
+      "tooltip": "This event contains objectionable content"
+    },
+    "group": {
+      "order": 18,
+      "text": "Group",
+      "tooltip": "The group's name, description, or content contains objectionable content"
+    },
+    "groupstore": {
+      "order": 19,
+      "text": "Group Store",
+      "tooltip": "The Store associated with this Group is broken or contains objectionable content"
+    },
+    "image": {
+      "order": 4,
+      "text": "Photos/Icons",
+      "tooltip": "The image, icon, or other graphics contain objectionable content"
+    },
+    "print": {
+      "order": 10,
+      "text": "Print",
+      "tooltip": "The print contains objectionable content"
+    },
+    "profile": {
+      "order": 3,
+      "text": "User Profile",
+      "tooltip": "The user's profile contains objectionable content"
+    },
+    "sticker": {
+      "order": 8,
+      "text": "Sticker",
+      "tooltip": "The user's sticker contains objectionable content"
+    },
+    "text": {
+      "order": 11,
+      "text": "Text",
+      "tooltip": "The name, status, or bio contain objectionable content"
+    },
+    "worldaudio": {
+      "order": 14,
+      "text": "Audio in World",
+      "tooltip": "An audio clip in this world contains objectionable content"
+    },
+    "worldimage": {
+      "order": 12,
+      "text": "Image in World",
+      "tooltip": "An image in this world contains objectionable content"
+    },
+    "worldobject": {
+      "order": 13,
+      "text": "Object in World",
+      "tooltip": "An object in this world contains objectionable content"
+    },
+    "worldpage": {
+      "order": 16,
+      "text": "World Page",
+      "tooltip": "The world page contains objectionable content"
+    },
+    "worldstore": {
+      "order": 17,
+      "text": "World Store",
+      "tooltip": "The Store associated with this World is broken or contains objectionable content"
+    },
+    "worldui": {
+      "order": 15,
+      "text": "UI/FX of World",
+      "tooltip": "The user interface and effects in this world contain objectionable content"
+    }
+  },
+  "reportFormUrl": "https://help.vrchat.com/hc/en-us/requests/new?ticket_form_id=41536165070483&tf_360057451993={userId}&tf_41537175838995={reportedId}&tf_subject={reason} {category} By {contentType} {reportedName}&tf_description={description}",
+  "reportOptions": {
+    "avatar": {
+      "avatar": [
+        "sexual",
+        "harassing",
+        "hateful",
+        "gore",
+        "threatening",
+        "integrity",
+        "child",
+        "copyright",
+        "other"
+      ],
+      "avatarpage": [
+        "sexual",
+        "harassing",
+        "hateful",
+        "gore",
+        "threatening",
+        "integrity",
+        "child",
+        "copyright",
+        "warnings",
+        "other"
+      ]
+    },
+    "emoji": {
+      "emoji": [
+        "sexual",
+        "harassing",
+        "hateful",
+        "gore",
+        "threatening",
+        "integrity",
+        "child",
+        "copyright",
+        "other"
+      ]
+    },
+    "event": {
+      "event": [
+        "sexual",
+        "harassing",
+        "hateful",
+        "gore",
+        "threatening",
+        "integrity",
+        "child",
+        "copyright",
+        "other"
+      ]
+    },
+    "group": {
+      "group": [
+        "sexual",
+        "harassing",
+        "hateful",
+        "gore",
+        "threatening",
+        "integrity",
+        "child",
+        "copyright",
+        "other"
+      ],
+      "groupstore": [
+        "billing",
+        "service",
+        "cancellation",
+        "security",
+        "renewal"
+      ]
+    },
+    "instance": {
+      "announcement": [
+        "sexual",
+        "harassing",
+        "hateful",
+        "gore",
+        "threatening",
+        "integrity",
+        "child",
+        "other"
+      ],
+      "text": [
+        "sexual",
+        "harassing",
+        "hateful",
+        "gore",
+        "threatening",
+        "integrity",
+        "child",
+        "other"
+      ]
+    },
+    "print": {
+      "print": [
+        "sexual",
+        "harassing",
+        "hateful",
+        "gore",
+        "threatening",
+        "integrity",
+        "child",
+        "copyright",
+        "other"
+      ]
+    },
+    "sticker": {
+      "sticker": [
+        "sexual",
+        "harassing",
+        "hateful",
+        "gore",
+        "threatening",
+        "integrity",
+        "child",
+        "copyright",
+        "other"
+      ]
+    },
+    "user": {
+      "behavior": [
+        "sexual",
+        "harassing",
+        "hateful",
+        "gore",
+        "threatening",
+        "integrity",
+        "hacking",
+        "child",
+        "other"
+      ],
+      "chat": [
+        "sexual",
+        "harassing",
+        "hateful",
+        "gore",
+        "threatening",
+        "integrity",
+        "child",
+        "other"
+      ],
+      "image": [
+        "sexual",
+        "harassing",
+        "hateful",
+        "gore",
+        "threatening",
+        "integrity",
+        "child",
+        "copyright",
+        "other"
+      ],
+      "profile": [
+        "sexual",
+        "harassing",
+        "hateful",
+        "gore",
+        "threatening",
+        "integrity",
+        "child",
+        "other"
+      ]
+    },
+    "world": {
+      "worldaudio": [
+        "sexual",
+        "harassing",
+        "hateful",
+        "gore",
+        "threatening",
+        "integrity",
+        "child",
+        "copyright",
+        "other"
+      ],
+      "worldimage": [
+        "sexual",
+        "harassing",
+        "hateful",
+        "gore",
+        "threatening",
+        "integrity",
+        "child",
+        "copyright",
+        "other"
+      ],
+      "worldobject": [
+        "sexual",
+        "harassing",
+        "hateful",
+        "gore",
+        "threatening",
+        "integrity",
+        "child",
+        "copyright",
+        "other"
+      ],
+      "worldpage": [
+        "sexual",
+        "harassing",
+        "hateful",
+        "gore",
+        "threatening",
+        "integrity",
+        "child",
+        "copyright",
+        "warnings",
+        "other"
+      ],
+      "worldstore": [
+        "billing",
+        "service",
+        "cancellation",
+        "security",
+        "renewal"
+      ],
+      "worldui": [
+        "sexual",
+        "harassing",
+        "hateful",
+        "gore",
+        "threatening",
+        "integrity",
+        "child",
+        "copyright",
+        "other"
+      ]
+    }
+  },
+  "reportReasons": {
+    "billing": {
+      "text": "Billing",
+      "tooltip": "The store has an issue with billing"
+    },
+    "cancellation": {
+      "text": "Cancellation",
+      "tooltip": "The store has an issue with a cancellation"
+    },
+    "child": {
+      "policy": [
+        "Endangerment of minors",
+        "Promoting or participating in illegal behaviors",
+        "Exposing minors to adult content"
+      ],
+      "text": "Child exploitation and abuse",
+      "tooltip": "The content involves the exploitation or abuse of children"
+    },
+    "copyright": {
+      "text": "Copyright",
+      "tooltip": ""
+    },
+    "gore": {
+      "policy": [
+        "Graphic content or violence",
+        "Realistic depictions of gore or death",
+        "Promoting illegal gangs or organizations"
+      ],
+      "text": "Violence or Gore",
+      "tooltip": "The content contains graphic violence or gruesome images that are intended to shock or disturb"
+    },
+    "hacking": {
+      "policy": [
+        "Reverse engineering VRChat content or applications",
+        "Circumventing anti-tamper software",
+        "Exploiting VRChat systems"
+      ],
+      "text": "Client Modding / Hacking",
+      "tooltip": "This person is using unapproved software for harmful or malicious intent"
+    },
+    "harassing": {
+      "policy": [
+        "Bullying, degradation, or harassment",
+        "Threats of harm or violence"
+      ],
+      "text": "Harassment, bullying or threats",
+      "tooltip": "The content has the intent to disturb or upset"
+    },
+    "hateful": {
+      "policy": [
+        "Hateful activity, behavior, or content",
+        "Promoting of hateful groups or symbols"
+      ],
+      "text": "Hateful and discriminatory content",
+      "tooltip": "The content contains hate speech, including language, symbols, and actions"
+    },
+    "integrity": {
+      "policy": [
+        "Spamming or abuse of bots",
+        "Impersonation of VRChat Users or Staff",
+        "Creating or using disruptive or malicious content",
+        "Promotion of illegal products"
+      ],
+      "text": "Integrity and Authenticity",
+      "tooltip": "Spamming, botting, impersonation, malicious content, or misinformation"
+    },
+    "none": {
+      "text": "I just don't like it",
+      "tooltip": ""
+    },
+    "other": {
+      "text": "Something else",
+      "tooltip": ""
+    },
+    "renewal": {
+      "text": "Renewal",
+      "tooltip": "The store has an issue with subscription renewals"
+    },
+    "security": {
+      "text": "Security Concern",
+      "tooltip": "The store has a security issue"
+    },
+    "service": {
+      "text": "Interruption of Service",
+      "tooltip": "The contents of the store are not functioning as advertised"
+    },
+    "sexual": {
+      "policy": [
+        "Sexually explicit activity, behavior, or content",
+        "Sexual harassment or solicitation",
+        "Non-consensual sexual conduct"
+      ],
+      "text": "Sexual Content",
+      "tooltip": "The content contains suggestive material"
+    },
+    "threatening": {
+      "policy": [
+        "Imminent risk of suicide",
+        "Depiction of suicidal or self-harm thoughts",
+        "Graphic content depicting self-harm"
+      ],
+      "text": "Suicide and self-harm",
+      "tooltip": "The user or content promotes, encourages, or glorifies suicide and self-harm"
+    },
+    "warnings": {
+      "text": "Content Warnings",
+      "tooltip": "There is something wrong with this content's warnings"
+    }
+  },
+  "requireAgeVerificationBetaTag": false,
+  "restNightlyApi": 0,
+  "rotationAttribute": false,
+  "sdkDeveloperFaqUrl": "https://docs.vrchat.com/docs/frequently-asked-questions#section-why-can-t-i-upload-content-yet-",
+  "sdkDiscordUrl": "https://discord.gg/vrchat",
+  "sdkNotAllowedToPublishMessage": "Welcome to the VRChat SDK!\r\n\r\nBefore you can upload avatars or worlds to VRChat, you'll need to spend more time enjoying the app. We do this for security reasons, and so you can learn more about us.\r\n\r\nWhen you get the ability to upload, we will notify you via email and in VRChat. For now, you can learn and test on your own device.\r\n\r\nTo get started, check out the resources below.\r\n\r\nThank you for your patience, we can't wait to see what you'll build!",
+  "sdkUnityVersion": "2022.3.22f1",
+  "semaphoreSouvenir": 0,
+  "showLoginQRCode": true,
+  "skipLegDay": false,
+  "sliceActiveFormatTtlListener": 0,
+  "stringHostUrlList": [
+    "*.github.io",
+    "pastebin.com",
+    "gist.githubusercontent.com",
+    "api.fynn.ai",
+    "api-dev.fynn.ai",
+    "*.xr-marketplace.com",
+    "*.uroom.online",
+    "*.v-market.work",
+    "*.vket.chat",
+    "*.poly.jp",
+    "*.vazar.jp",
+    "*.catsudon.net",
+    "*.vazarapi.com",
+    "vr.anique.jp",
+    "*.vrcdn.cloud",
+    "*.disbridge.com",
+    "boop.fynn.ai",
+    "*.yizmarkia.com",
+    "*.sa-vrc-media.com",
+    "*.gugenka-media.com",
+    "*.nci-system.com",
+    "*.v-inc.jp",
+    "*.gugenka-media.jp",
+    "cdn.furality.org"
+  ],
+  "supportEmail": "support@vrchat.com",
+  "supportFormUrl": "https://help.vrchat.com/hc/en-us/requests/new?ticket_form_id=360006750513&tf_360057451993={userId}&tf_subject={reason}%20{category}%20By%20{contentType}%20{reportedName}&tf_description={description}",
+  "thresholdProtocolArrayIpv4": 0,
+  "throttleLoss": 12295,
+  "ticketFormationSegmentPocket": 20929,
+  "timeOutWorldId": "wrld_5b89c79e-c340-4510-be1b-476e9fcdedcc",
+  "timeRankingBeachKeyword": 1,
+  "timekeeping": true,
+  "timeoutPrototypeRankGroup": 0.9941863256883521,
+  "tutorialWorldId": "wld_7d3d25ec-663e-406e-96a3-e2c4fc0d8104",
+  "updateRateMsMaximum": 1000,
+  "updateRateMsMinimum": 50,
+  "updateRateMsNormal": 200,
+  "updateRateMsUdonManual": 50,
+  "uploadAnalysisPercent": 1,
+  "urlList": [
+    "*.facebook.com",
+    "*.nicovideo.jp",
+    "soundcloud.com",
+    "*.twitch.tv",
+    "*.vimeo.com",
+    "*.youku.com",
+    "*.youtube.com",
+    "youtu.be",
+    "assets.vrchat.com",
+    "*.v-market.work",
+    "music4.cdn.vket.com",
+    "*.vrcdn.live",
+    "*.vrcdn.video",
+    "mixcloud.com",
+    "twisteventsasia.com",
+    "stream.broadcast.unity.com",
+    "*.furality.online",
+    "live.foxcdn.io",
+    "*.xr-marketplace.com",
+    "*.uroom.online",
+    "*.vket.chat",
+    "ciel.topaz.chat",
+    "movie.vketcdn.com",
+    "*.poly.jp",
+    "*.vazar.jp",
+    "*.catsudon.net",
+    "redirect.vrchat.com",
+    "*.fbcdn.net",
+    "*.sndcdn.com",
+    "*.ttvnw.net",
+    "*.twitchcdn.net",
+    "*.jtvnw.net",
+    "*.googlevideo.com",
+    "*.mixcloud.com",
+    "vod-progressive.akamaized.net",
+    "dqrpb9wgowsf5.cloudfront.net",
+    "ds0h3roq6wcgc.cloudfront.net",
+    "d2nvs31859zcd8.cloudfront.net",
+    "virtualokinawa-on-demand.contents.work",
+    "*.midcircuitcdn.com",
+    "hyperbeam.com",
+    "hyperbeam.dev",
+    "*.hyperbeam.com",
+    "*.hyperbeam.dev",
+    "vr-static.anique.jp",
+    "*.vrcdn.cloud",
+    "vrc.gate.vrtv.jp",
+    "topaz.chat",
+    "*.topaz.chat",
+    "stream.vrtv.jp",
+    "themightygym.com",
+    "mightygymcdn.nyc3.cdn.digitaloceanspaces.com",
+    "*.virtualokinawa-on-demand.contents.work",
+    "*.yizmarkia.com",
+    "*.sa-vrc-media.com",
+    "*.gugenka-media.com",
+    "*.nci-system.com",
+    "*.v-inc.jp",
+    "*.gugenka-media.jp",
+    "cdn.furality.org",
+    "api-vrc.sammy.co.jp",
+    "cdn-vrc.sammy.co.jp",
+    "vrc.sammy.co.jp",
+    "customer-xv2a3pcqk85obd78.cloudflarestream.com"
+  ],
+  "useReliableUdpForVoice": false,
+  "use_void_requiem_core": true,
+  "varietyBoxPriority": 500,
+  "viveWindowsUrl": "http://store.steampowered.com/app/438100/",
+  "voiceConfig": {
+    "jb_legacyNetworkEncodingBufferPaddingMs": 10,
+    "mobilePlatformBufferMultiplier": 1.25,
+    "voiceReceiverThreads": 2,
+    "voiceReceiverThreads_mobile": 1
+  },
+  "voiceMaxPlaybackSourcesMobile": 4,
+  "voiceMaxPlaybackSourcesPC": 0,
+  "websocketMaxFriendsRefreshDelay": 900,
+  "websocketQuickReconnectTime": 10,
+  "websocketReconnectMaxDelay": 2,
+  "whiteListedAssetUrls": [
+    "http://dbinj8iahsbec.cloudfront.net/plugins",
+    "http://dbinj8iahsbec.cloudfront.net/",
+    "https://dbinj8iahsbec.cloudfront.net/",
+    "https://dev-api.vrchat.cloud/api/1/file/",
+    "https://api.vrchat.cloud/api/1/file/",
+    "https://files.vrchat.cloud/unmanaged/",
+    "https://assets.vrchat.com/adminfiles/",
+    "https://dev-assets.vrchat.cloud/adminfiles/"
+  ]
+}

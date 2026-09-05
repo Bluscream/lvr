@@ -27,6 +27,7 @@ pub enum Trigger {
 }
 
 impl Trigger {
+    #[allow(dead_code)]
     pub const KINDS: [&'static str; 5] = [
         "VRChat running",
         "WiVRn running",
@@ -332,6 +333,7 @@ fn default_steam_start_command() -> String {
 impl SteamConfig {
     /// The profile to switch to when the button is pressed, given the profile
     /// that is active now. Cycles, so a third profile would work too.
+    #[allow(dead_code)]
     pub fn next_profile(&self, active: Option<&str>) -> Option<&SteamProfile> {
         if self.profiles.is_empty() {
             return None;

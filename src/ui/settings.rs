@@ -15,7 +15,7 @@ pub fn show(app: &mut LvrApp, ui: &mut Ui) {
         ui.add_space(12.0);
         vrchat(app, ui);
         ui.add_space(12.0);
-        steam(app, ui);
+        vrc_files_and_tools(app, ui);
         ui.add_space(12.0);
         virtual_display(app, ui);
         ui.add_space(12.0);
@@ -270,147 +270,65 @@ fn vrchat(app: &mut LvrApp, ui: &mut Ui) {
     }
 }
 
-fn steam(app: &mut LvrApp, ui: &mut Ui) {
-    widgets::heading(ui, "Steam Proton profiles");
+fn vrc_files_and_tools(_app: &mut LvrApp, ui: &mut Ui) {
+    widgets::heading(ui, "VRChat prefix & tools");
     ui.label(
         RichText::new(
-            "The dashboard button cycles these profiles for one Steam AppID. Switching \
-             quits Steam, rewrites config.vdf and localconfig.vdf (a .lvr.bak is kept) \
-             and starts Steam again.",
+            "Quick access to the VRChat Proton prefix hosts file (for video/image/string blocking) \
+             and the VRChat Tools folder (where yt-dlp.exe is located).",
         )
         .size(13.0)
         .color(GREY),
     );
     ui.add_space(6.0);
 
-    egui::Grid::new("settings-steam")
-        .num_columns(2)
-        .spacing([14.0, 12.0])
-        .min_col_width(190.0)
-        .show(ui, |ui| {
-            ui.label("Profile switching");
-            {
-                let mut config = app.shared.config();
-                widgets::toggle(
-                    ui,
-                    &mut config.steam.enabled,
-                    "show the profile button on the dashboard",
-                );
-            }
-            ui.end_row();
+    let prefix_opt = crate::domain_block::detect_vrc_prefix("");
 
-            ui.label("Confirm switch");
-            {
-                let mut config = app.shared.config();
-                widgets::toggle(
-                    ui,
-                    &mut config.steam.confirm_switch,
-                    "ask before restarting Steam",
-                );
-            }
-            ui.end_row();
+    match prefix_opt {
+        Some(ref prefix) => {
+            let hosts_file = crate::domain_block::prefix_hosts_path(&prefix);
+            let tools_dir = crate::domain_block::vrc_tools_dir(&prefix);
 
-            ui.label("AppID");
-            {
-                let mut config = app.shared.config();
-                ui.add(
-                    egui::TextEdit::singleline(&mut config.steam.app_id)
-                        .desired_width(140.0)
-                        .hint_text("438100"),
-                );
-            }
-            ui.end_row();
-
-            ui.label("Shutdown command");
-            {
-                let mut config = app.shared.config();
-                ui.add(
-                    egui::TextEdit::singleline(&mut config.steam.shutdown_command)
-                        .desired_width(430.0),
-                );
-            }
-            ui.end_row();
-
-            ui.label("Start command");
-            {
-                let mut config = app.shared.config();
-                ui.add(
-                    egui::TextEdit::singleline(&mut config.steam.start_command)
-                        .desired_width(430.0),
-                );
-            }
-            ui.end_row();
-
-            ui.label("Shutdown timeout");
-            {
-                let mut config = app.shared.config();
-                ui.add(
-                    egui::DragValue::new(&mut config.steam.shutdown_timeout_secs)
-                        .range(5..=300)
-                        .speed(1.0)
-                        .suffix(" s"),
-                );
-            }
-            ui.end_row();
-        });
-
-    let active = app.status.steam_profile.clone();
-    let count = app.shared.config().steam.profiles.len();
-    for index in 0..count {
-        let (name, is_active) = {
-            let config = app.shared.config();
-            let profile = &config.steam.profiles[index];
-            (profile.name.clone(), Some(&profile.name) == active.as_ref())
-        };
-        ui.add_space(8.0);
-        egui::Frame::group(ui.style())
-            .corner_radius(egui::CornerRadius::same(10))
-            .show(ui, |ui| {
-                ui.horizontal(|ui| {
-                    ui.label(RichText::new(&name).size(16.0).strong());
-                    if is_active {
-                        ui.label(RichText::new("active").size(13.0).color(GREEN));
+            ui.horizontal_wrapped(|ui| {
+                if widgets::row_button(ui, "📄 Open Hosts File", Some(BLUE), 180.0).clicked() {
+                    if let Some(parent) = hosts_file.parent() {
+                        let _ = std::fs::create_dir_all(parent);
                     }
-                });
-                let mut config = app.shared.config();
-                let profile = &mut config.steam.profiles[index];
-                ui.add(
-                    egui::TextEdit::singleline(&mut profile.name)
-                        .desired_width(430.0)
-                        .hint_text("button label"),
-                );
-                ui.add(
-                    egui::TextEdit::singleline(&mut profile.compat_tool)
-                        .desired_width(430.0)
-                        .hint_text("compat tool, e.g. GE-Proton9-25"),
-                );
-                ui.add(
-                    egui::TextEdit::multiline(&mut profile.launch_options)
-                        .desired_rows(3)
-                        .desired_width(430.0)
-                        .font(egui::TextStyle::Monospace)
-                        .hint_text("launch options including %command%"),
-                );
-                ui.add(
-                    egui::TextEdit::singleline(&mut profile.note)
-                        .desired_width(430.0)
-                        .hint_text("note shown in the confirmation"),
-                );
-            });
-    }
+                    if !hosts_file.exists() {
+                        let _ = std::fs::write(&hosts_file, "127.0.0.1 localhost\n::1 localhost\n");
+                    }
+                    let _ = std::process::Command::new("xdg-open")
+                        .arg(&hosts_file)
+                        .spawn();
+                }
 
-    if !app.status.steam_compat_tool.is_empty() {
-        ui.add_space(6.0);
-        ui.label(
-            RichText::new(format!("On disk right now: {}", app.status.steam_compat_tool))
-                .size(12.0)
-                .color(if active.is_some() { GREY } else { ORANGE }),
-        );
+                if widgets::row_button(ui, "🛠 Open Tools Folder", Some(GREEN), 180.0).clicked() {
+                    let _ = std::fs::create_dir_all(&tools_dir);
+                    let _ = std::process::Command::new("xdg-open")
+                        .arg(&tools_dir)
+                        .spawn();
+                }
+            });
+
+            ui.add_space(4.0);
+            ui.label(
+                RichText::new(format!("Prefix: {}", prefix.display()))
+                    .size(11.0)
+                    .color(GREY),
+            );
+        }
+        None => {
+            ui.label(
+                RichText::new("VRChat Proton prefix not detected automatically. Start VRChat once or check Steam compatdata.")
+                    .size(13.0)
+                    .color(ORANGE),
+            );
+        }
     }
 }
 
 fn virtual_display(app: &mut LvrApp, ui: &mut Ui) {
-    widgets::heading(ui, "Virtual 4K Display");
+    widgets::heading(ui, "Virtual Display");
     egui::Grid::new("settings-virtual-display")
         .num_columns(2)
         .spacing([14.0, 12.0])
@@ -422,7 +340,7 @@ fn virtual_display(app: &mut LvrApp, ui: &mut Ui) {
                 widgets::toggle(
                     ui,
                     &mut config.virtual_display.create_on_startup,
-                    "automatically create a virtual 4K display when lvr starts",
+                    "automatically create a virtual display when lvr starts",
                 );
             }
             ui.end_row();
@@ -433,7 +351,7 @@ fn virtual_display(app: &mut LvrApp, ui: &mut Ui) {
                 widgets::toggle(
                     ui,
                     &mut config.virtual_display.create_on_last_display_unplugged,
-                    "automatically create a 4K display when the last monitor is unplugged",
+                    "automatically create a virtual display when the last monitor is unplugged",
                 );
             }
             ui.end_row();

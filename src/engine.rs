@@ -207,6 +207,8 @@ pub struct Engine {
     cached_default_sink: String,
     cached_default_source: String,
     steam: SteamState,
+    block_state: crate::domain_block::BlockState,
+    last_media_block_poll: Option<Instant>,
     virtual_display_created: bool,
     last_display_count: Option<usize>,
 }
@@ -225,6 +227,7 @@ const DEVICE_POLL_INTERVAL: Duration = Duration::from_secs(15);
 const WIVRN_SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(10);
 const WIVRN_STARTUP_TIMEOUT: Duration = Duration::from_secs(25);
 const STEAM_POLL_INTERVAL: Duration = Duration::from_secs(10);
+const MEDIA_BLOCK_POLL_INTERVAL: Duration = Duration::from_secs(5);
 
 impl Engine {
     pub fn new(shared: Shared, rx: UnboundedReceiver<Command>) -> Self {
@@ -244,6 +247,10 @@ impl Engine {
             cached_default_sink: String::new(),
             cached_default_source: String::new(),
             steam: SteamState::default(),
+            block_state: crate::domain_block::detect_vrc_prefix("")
+                .map(|p| crate::domain_block::read_block_state(&p))
+                .unwrap_or_default(),
+            last_media_block_poll: None,
             virtual_display_created: false,
             last_display_count: None,
         }
@@ -251,6 +258,9 @@ impl Engine {
 
     pub async fn run(mut self) {
         self.shared.info("Supervisor started");
+        tokio::spawn(async {
+            crate::domain_block::init_from_remote_or_fallback().await;
+        });
         if self.shared.config().virtual_display.create_on_startup {
             let res = self.shared.config().virtual_display.resolution.clone();
             if display::create_virtual_4k_display(&res) {
@@ -311,6 +321,13 @@ impl Engine {
                 self.last_audio_poll = None;
             }
             Command::SwitchSteamProfile(name) => self.switch_steam_profile(&name).await,
+            Command::ToggleBlockCategory(category) => {
+                let current = self.block_state.is_blocked(category);
+                self.set_block_category(category, !current).await;
+            }
+            Command::SetBlockCategory(category, block) => {
+                self.set_block_category(category, block).await;
+            }
             Command::CreateVirtualDisplay => {
                 let res = self.shared.config().virtual_display.resolution.clone();
                 let created = display::create_virtual_4k_display(&res);
@@ -353,6 +370,7 @@ impl Engine {
             .await;
         self.refresh_audio_cache(&config).await;
         self.refresh_steam_cache(&config);
+        self.refresh_media_block_cache();
 
         let current_displays = display::get_connected_display_count();
         if let Some(last_count) = self.last_display_count {
@@ -388,6 +406,7 @@ impl Engine {
             steam_profile: self.steam.profile.clone(),
             steam_compat_tool: self.steam.compat_tool.clone(),
             steam_switching: self.steam.switching,
+            block_state: self.block_state,
             sinks: self.cached_sinks.clone(),
             sources: self.cached_sources.clone(),
             display_count: current_displays,
@@ -996,6 +1015,43 @@ impl Engine {
         steam::start_steam(&config.steam).await?;
         Ok(())
     }
+
+    // ------------------------------------------------------------ media blocker
+
+    fn refresh_media_block_cache(&mut self) {
+        if let Some(last) = self.last_media_block_poll
+            && last.elapsed() < MEDIA_BLOCK_POLL_INTERVAL
+        {
+            return;
+        }
+        self.last_media_block_poll = Some(Instant::now());
+
+        if let Some(prefix) = crate::domain_block::detect_vrc_prefix("") {
+            self.block_state = crate::domain_block::read_block_state(&prefix);
+        }
+    }
+
+    async fn set_block_category(&mut self, category: crate::domain_block::BlockCategory, block: bool) {
+        let Some(prefix) = crate::domain_block::detect_vrc_prefix("") else {
+            self.shared.error("Could not find VRChat Proton prefix to toggle media blocking");
+            return;
+        };
+
+        match crate::domain_block::set_category_blocked(&prefix, category, block) {
+            Ok(()) => {
+                self.block_state.set_blocked(category, block);
+                let label = category.label();
+                if block {
+                    self.shared.warn(format!("VRChat {label} BLOCKED"));
+                } else {
+                    self.shared.info(format!("VRChat {label} ALLOWED (unblocked)"));
+                }
+            }
+            Err(err) => {
+                self.shared.error(format!("Failed to update {category:?} blocking state: {err:#}"));
+            }
+        }
+    }
 }
 
 /// One-shot audio routing for `lvr --audio vr|desktop`, usable without a
@@ -1094,6 +1150,9 @@ pub async fn probe(config: &Config) -> Status {
             .map(|setup| setup.compat_tool)
             .unwrap_or_default(),
         steam_switching: false,
+        block_state: crate::domain_block::detect_vrc_prefix("")
+            .map(|p| crate::domain_block::read_block_state(&p))
+            .unwrap_or_default(),
         sinks: audio::list_devices(Kind::Sink).await.unwrap_or_default(),
         sources: audio::list_devices(Kind::Source).await.unwrap_or_default(),
         display_count: display::get_connected_display_count(),

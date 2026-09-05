@@ -213,37 +213,52 @@ impl LvrApp {
 
     fn sync_zoom(&mut self, ctx: &egui::Context) {
         let wanted = self.shared.config().general.ui_scale;
-        if (wanted - self.applied_zoom).abs() > f32::EPSILON {
+        if (wanted - self.applied_zoom).abs() > 0.005 {
             self.applied_zoom = wanted;
             ctx.set_zoom_factor(wanted);
         }
     }
 
     fn tab_bar(&mut self, ui: &mut egui::Ui) {
-        ui.add_space(6.0);
-        ui.horizontal_wrapped(|ui| {
+        ui.add_space(4.0);
+
+        let full = ui.available_width();
+        let spacing = ui.spacing().item_spacing.x;
+        let status_badge_width = 175.0;
+        let show_status_inline = full > 850.0;
+        let tabs_avail = if show_status_inline {
+            full - status_badge_width - spacing
+        } else {
+            full
+        };
+        let tab_btn_w = ((tabs_avail - spacing * 4.0) / 5.0).floor().max(40.0);
+
+        ui.horizontal(|ui| {
             for tab in Tab::ALL {
                 let selected = self.tab == tab;
-                let text = RichText::new(tab.label()).size(16.0).strong();
+                let text = RichText::new(tab.label()).size(14.0).strong();
                 let button = egui::Button::new(text)
-                    .corner_radius(egui::CornerRadius::same(10))
+                    .corner_radius(egui::CornerRadius::same(8))
                     .selected(selected);
-                if ui.add_sized(egui::Vec2::new(132.0, 44.0), button).clicked() {
+                if ui.add_sized(egui::Vec2::new(tab_btn_w, 38.0), button).clicked() {
                     self.tab = tab;
                 }
             }
-            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                let (color, text) = if self.status.headset_connected {
-                    (widgets::GREEN, "HEADSET CONNECTED")
-                } else if self.status.wivrn_running {
-                    (widgets::BLUE, "WIVRN READY")
-                } else {
-                    (widgets::GREY, "WIVRN OFFLINE")
-                };
-                ui.label(RichText::new(text).size(14.0).strong().color(color));
-            });
+
+            if show_status_inline {
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    let (color, text) = if self.status.headset_connected {
+                        (widgets::GREEN, "HEADSET CONNECTED")
+                    } else if self.status.wivrn_running {
+                        (widgets::BLUE, "WIVRN READY")
+                    } else {
+                        (widgets::GREY, "WIVRN OFFLINE")
+                    };
+                    ui.label(RichText::new(text).size(13.0).strong().color(color));
+                });
+            }
         });
-        ui.add_space(6.0);
+        ui.add_space(4.0);
     }
 
     fn entry_editor_window(&mut self, ctx: &egui::Context) {
@@ -456,6 +471,7 @@ impl LvrApp {
         }
     }
 
+    #[allow(dead_code)]
     fn request_steam_switch(&mut self, name: String) {
         if self.shared.config().steam.confirm_switch {
             self.confirming_steam_switch = Some(name);
