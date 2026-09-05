@@ -31,7 +31,7 @@ pub enum Command {
     /// Point the managed Steam app at the named Proton profile, restarting
     /// Steam around the edit.
     SwitchSteamProfile(String),
-    /// Create a virtual 4K display manually or on trigger.
+    /// Create a virtual display manually or on trigger.
     CreateVirtualDisplay,
     /// Remove/disable virtual display manually or on trigger.
     RemoveVirtualDisplay,
@@ -70,8 +70,11 @@ pub struct Status {
     pub block_state: crate::domain_block::BlockState,
     pub sinks: Vec<AudioDevice>,
     pub sources: Vec<AudioDevice>,
+    #[allow(dead_code)]
     pub display_count: usize,
     pub virtual_display_created: bool,
+    pub virtual_display_info: Option<String>,
+    #[allow(dead_code)]
     pub last_tick: Option<DateTime<Local>>,
 }
 
@@ -318,6 +321,10 @@ impl Shared {
         }
         drop(logs);
         self.request_repaint();
+    }
+
+    pub fn debug(&self, message: impl Into<String>) {
+        self.log(LogLevel::Debug, message);
     }
 
     pub fn info(&self, message: impl Into<String>) {

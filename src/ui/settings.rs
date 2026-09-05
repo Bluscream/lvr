@@ -340,7 +340,7 @@ fn virtual_display(app: &mut LvrApp, ui: &mut Ui) {
                 widgets::toggle(
                     ui,
                     &mut config.virtual_display.create_on_startup,
-                    "automatically create a virtual display when lvr starts",
+                    "automatically create a virtual display when lvr starts if no physical display is connected",
                 );
             }
             ui.end_row();
@@ -359,10 +359,88 @@ fn virtual_display(app: &mut LvrApp, ui: &mut Ui) {
             ui.label("Resolution mode");
             {
                 let mut config = app.shared.config();
-                ui.add(
-                    egui::TextEdit::singleline(&mut config.virtual_display.resolution)
-                        .hint_text("3840x2160@120"),
-                );
+                let current_raw = config.virtual_display.resolution.clone();
+                let (mut current_res, mut current_hz) = if let Some((r, h)) = current_raw.split_once('@') {
+                    (r.to_string(), h.to_string())
+                } else {
+                    (current_raw.clone(), "60".to_string())
+                };
+
+                let common_resolutions = [
+                    ("1280x720", "1280x720 (720p HD)"),
+                    ("1920x1080", "1920x1080 (1080p FHD)"),
+                    ("2560x1440", "2560x1440 (1440p QHD)"),
+                    ("3440x1440", "3440x1440 (UWQHD Ultrawide)"),
+                    ("3840x2160", "3840x2160 (4K UHD)"),
+                    ("5120x1440", "5120x1440 (Dual QHD 32:9)"),
+                    ("7680x4320", "7680x4320 (8K UHD)"),
+                    // VR headset-specific single-eye & combined panel targets
+                    ("1832x1920", "1832x1920 (Quest 2 native per-eye)"),
+                    ("2064x2208", "2064x2208 (Quest 3 native per-eye)"),
+                    ("4128x2208", "4128x2208 (Quest 3 combined panel)"),
+                    ("2448x2448", "2448x2448 (Vive Pro 2 native per-eye)"),
+                    ("2880x2720", "2880x2720 (Bigscreen Beyond per-eye)"),
+                    ("3552x3840", "3552x3840 (Apple Vision Pro per-eye)"),
+                    ("3840x3552", "3840x3552 (Somnium VR1 per-eye)"),
+                    ("5120x2160", "5120x2160 (5K2K Ultrawide)"),
+                ];
+
+                let refresh_rates = [
+                    "30",
+                    "45",
+                    "60",
+                    "72",
+                    "75",
+                    "80",
+                    "90",
+                    "100",
+                    "120",
+                    "144",
+                    "165",
+                    "180",
+                    "207",
+                    "240",
+                ];
+
+                let mut changed = false;
+
+                ui.horizontal(|ui| {
+                    let res_label = common_resolutions
+                        .iter()
+                        .find(|(res, _)| *res == current_res)
+                        .map(|(_, desc)| *desc)
+                        .unwrap_or(&current_res);
+
+                    egui::ComboBox::from_id_salt("vd-resolution-select")
+                        .width(260.0)
+                        .selected_text(res_label)
+                        .show_ui(ui, |ui| {
+                            for (res, desc) in common_resolutions {
+                                if ui.selectable_label(current_res == res, desc).clicked() {
+                                    current_res = res.to_string();
+                                    changed = true;
+                                }
+                            }
+                        });
+
+                    let hz_label = format!("{current_hz} Hz");
+                    egui::ComboBox::from_id_salt("vd-refresh-select")
+                        .width(90.0)
+                        .selected_text(hz_label)
+                        .show_ui(ui, |ui| {
+                            for rate in refresh_rates {
+                                let label = format!("{rate} Hz");
+                                if ui.selectable_label(current_hz == rate, label).clicked() {
+                                    current_hz = rate.to_string();
+                                    changed = true;
+                                }
+                            }
+                        });
+                });
+
+                if changed {
+                    config.virtual_display.resolution = format!("{current_res}@{current_hz}");
+                }
             }
             ui.end_row();
         });

@@ -210,6 +210,7 @@ pub struct Engine {
     block_state: crate::domain_block::BlockState,
     last_media_block_poll: Option<Instant>,
     virtual_display_created: bool,
+    virtual_display_info: Option<String>,
     last_display_count: Option<usize>,
 }
 
@@ -252,6 +253,7 @@ impl Engine {
                 .unwrap_or_default(),
             last_media_block_poll: None,
             virtual_display_created: false,
+            virtual_display_info: None,
             last_display_count: None,
         }
     }
@@ -262,10 +264,16 @@ impl Engine {
             crate::domain_block::init_from_remote_or_fallback().await;
         });
         if self.shared.config().virtual_display.create_on_startup {
-            let res = self.shared.config().virtual_display.resolution.clone();
-            if display::create_virtual_4k_display(&res) {
-                self.virtual_display_created = true;
-                self.shared.info("Created virtual 4K display on app startup");
+            let physical_count = display::get_connected_display_count();
+            if physical_count == 0 {
+                let res = self.shared.config().virtual_display.resolution.clone();
+                if let Some(info) = display::create_virtual_display(&res) {
+                    self.virtual_display_created = true;
+                    self.virtual_display_info = Some(info.clone());
+                    self.shared.info(format!("Created virtual display {info} on app startup (no physical display connected)"));
+                }
+            } else {
+                self.shared.debug(format!("Skipping virtual display creation on startup: {physical_count} physical display(s) connected"));
             }
         }
         loop {
@@ -330,17 +338,18 @@ impl Engine {
             }
             Command::CreateVirtualDisplay => {
                 let res = self.shared.config().virtual_display.resolution.clone();
-                let created = display::create_virtual_4k_display(&res);
-                if created {
+                if let Some(info) = display::create_virtual_display(&res) {
                     self.virtual_display_created = true;
-                    self.shared.info("Created virtual 4K display");
+                    self.virtual_display_info = Some(info.clone());
+                    self.shared.info(format!("Created virtual display {info}"));
                 } else {
-                    self.shared.error("Failed to create virtual 4K display");
+                    self.shared.error("Failed to create virtual display");
                 }
             }
             Command::RemoveVirtualDisplay => {
                 display::remove_virtual_display();
                 self.virtual_display_created = false;
+                self.virtual_display_info = None;
                 self.shared.info("Removed virtual display");
             }
             Command::SaveConfig => match self.shared.save_config() {
@@ -375,16 +384,18 @@ impl Engine {
         let current_displays = display::get_connected_display_count();
         if let Some(last_count) = self.last_display_count {
             if last_count > 0 && current_displays == 0 && config.virtual_display.create_on_last_display_unplugged {
-                self.shared.warn("Last physical display unplugged, creating virtual 4K display...");
+                self.shared.warn("Last physical display unplugged, creating virtual display...");
                 let res = config.virtual_display.resolution.clone();
-                if display::create_virtual_4k_display(&res) {
+                if let Some(info) = display::create_virtual_display(&res) {
                     self.virtual_display_created = true;
-                    self.shared.info("Virtual 4K display created on display disconnect");
+                    self.virtual_display_info = Some(info.clone());
+                    self.shared.info(format!("Virtual display {info} created on display disconnect"));
                 }
             } else if last_count == 0 && current_displays > 0 && self.virtual_display_created {
                 self.shared.info("Physical display re-connected, removing virtual display...");
                 if display::remove_virtual_display() {
                     self.virtual_display_created = false;
+                    self.virtual_display_info = None;
                     self.shared.info("Virtual display removed");
                 }
             }
@@ -411,6 +422,7 @@ impl Engine {
             sources: self.cached_sources.clone(),
             display_count: current_displays,
             virtual_display_created: self.virtual_display_created,
+            virtual_display_info: self.virtual_display_info.clone(),
             last_tick: Some(chrono::Local::now()),
         };
         self.shared.set_status(status);
@@ -1157,6 +1169,7 @@ pub async fn probe(config: &Config) -> Status {
         sources: audio::list_devices(Kind::Source).await.unwrap_or_default(),
         display_count: display::get_connected_display_count(),
         virtual_display_created: false,
+        virtual_display_info: None,
         last_tick: Some(chrono::Local::now()),
     }
 }

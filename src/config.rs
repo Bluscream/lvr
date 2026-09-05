@@ -376,9 +376,9 @@ impl Default for AudioConfig {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct VirtualDisplayConfig {
-    /// Create a virtual 4K display when lvr starts.
+    /// Create a virtual display when lvr starts if no physical display is connected.
     pub create_on_startup: bool,
-    /// Create a virtual 4K display when the last remaining physical display is unplugged.
+    /// Create a virtual display when the last remaining physical display is unplugged.
     pub create_on_last_display_unplugged: bool,
     /// Virtual display resolution mode (default: "3840x2160@60").
     pub resolution: String,
