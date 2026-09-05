@@ -97,11 +97,12 @@ cargo build --release --manifest-path "$SOURCE_DIR/Cargo.toml"
 backups=()
 install_file() {
     local mode="$1" source="$2" target="$3"
-    if [ -e "$target" ] && ! cmp -s "$source" "$target"; then
-        local backup="$target.bak-$(date +%Y%m%d%H%M%S)"
-        cp -p "$target" "$backup"
-        backups+=("$backup")
-    fi
+    # Displaced backup creation disabled per user request:
+    # if [ -e "$target" ] && ! cmp -s "$source" "$target"; then
+    #     local backup="$target.bak-$(date +%Y%m%d%H%M%S)"
+    #     cp -p "$target" "$backup"
+    #     backups+=("$backup")
+    # fi
     install -D"m$mode" "$source" "$target"
 }
 

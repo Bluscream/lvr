@@ -58,21 +58,21 @@ pub fn pill(ui: &mut Ui, label: &str, value: &str, color: Color32) {
     pill_sized(ui, label, value, color, 0.0);
 }
 
-/// Coloured status chip with optional minimum width to prevent horizontal squeezing.
-pub fn pill_sized(ui: &mut Ui, label: &str, value: &str, color: Color32, min_width: f32) {
+/// Coloured status chip with target width to prevent horizontal squeezing or overflow.
+pub fn pill_sized(ui: &mut Ui, label: &str, value: &str, color: Color32, width: f32) {
     let frame = egui::Frame::new()
         .fill(color.gamma_multiply(0.16))
         .stroke((1.0, color.gamma_multiply(0.8)))
         .corner_radius(CornerRadius::same(10))
-        .inner_margin(egui::Margin::symmetric(12, 8));
+        .inner_margin(egui::Margin::symmetric(10, 6));
 
     frame.show(ui, |ui| {
-        if min_width > 0.0 {
-            ui.set_min_width(min_width);
+        if width > 0.0 {
+            ui.set_width(width);
         }
         ui.vertical(|ui| {
-            ui.label(RichText::new(label).size(12.0).color(GREY));
-            ui.label(RichText::new(value).size(16.0).strong().color(color));
+            ui.label(RichText::new(label).size(11.0).color(GREY));
+            ui.label(RichText::new(value).size(15.0).strong().color(color));
         });
     });
 }
