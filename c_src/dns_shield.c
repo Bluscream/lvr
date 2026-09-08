@@ -42,10 +42,10 @@ static void init_rules_path(void) {
         return;
     }
 
-    // 2. Check XDG_RUNTIME_DIR (/run/user/<uid>/lvr/shield_rules.json)
+    // 2. Check XDG_RUNTIME_DIR (/run/user/<uid>/lvr/shield_rules.txt)
     const char *runtime = getenv("XDG_RUNTIME_DIR");
     if (runtime && runtime[0]) {
-        snprintf(g_rules_path, sizeof(g_rules_path), "%s/lvr/shield_rules.json", runtime);
+        snprintf(g_rules_path, sizeof(g_rules_path), "%s/lvr/shield_rules.txt", runtime);
         struct stat st;
         if (stat(g_rules_path, &st) == 0) {
             g_path_initialized = 1;
@@ -53,12 +53,12 @@ static void init_rules_path(void) {
         }
     }
 
-    // 3. Fall back to ~/.cache/lvr/shield_rules.json
+    // 3. Fall back to ~/.cache/lvr/shield_rules.txt
     const char *home = getenv("HOME");
     if (home && home[0]) {
-        snprintf(g_rules_path, sizeof(g_rules_path), "%s/.cache/lvr/shield_rules.json", home);
+        snprintf(g_rules_path, sizeof(g_rules_path), "%s/.cache/lvr/shield_rules.txt", home);
     } else {
-        snprintf(g_rules_path, sizeof(g_rules_path), "/tmp/lvr_shield_rules.json");
+        snprintf(g_rules_path, sizeof(g_rules_path), "/tmp/lvr_shield_rules.txt");
     }
     g_path_initialized = 1;
 }
@@ -74,69 +74,47 @@ static void free_rules_unlocked(void) {
     g_table.count = 0;
 }
 
-// Minimal, zero-allocation-heavy JSON string extractor for "rules": [ "...", ... ]
+// Load simple newline-separated rules list (.txt)
 static void load_rules_unlocked(const char *path) {
     FILE *f = fopen(path, "r");
     if (!f) return;
 
-    fseek(f, 0, SEEK_END);
-    long sz = ftell(f);
-    if (sz <= 0 || sz > 10 * 1024 * 1024) { // Max 10MB
-        fclose(f);
-        return;
-    }
-    fseek(f, 0, SEEK_SET);
-
-    char *buf = malloc(sz + 1);
-    if (!buf) {
-        fclose(f);
-        return;
-    }
-
-    size_t read_bytes = fread(buf, 1, sz, f);
-    fclose(f);
-    buf[read_bytes] = '\0';
-
     char **new_rules = malloc(sizeof(char*) * MAX_RULES);
     if (!new_rules) {
-        free(buf);
+        fclose(f);
         return;
     }
 
     size_t count = 0;
-    char *p = buf;
+    char line[512];
 
-    while (*p && count < MAX_RULES) {
-        // Look for string literal "..."
-        if (*p == '"') {
-            p++;
-            char *start = p;
-            while (*p && *p != '"') {
-                if (*p == '\\' && *(p + 1)) p += 2;
-                else p++;
+    while (fgets(line, sizeof(line), f) && count < MAX_RULES) {
+        // Strip comments (#)
+        char *comment = strchr(line, '#');
+        if (comment) *comment = '\0';
+
+        // Trim leading whitespace
+        char *start = line;
+        while (*start && isspace((unsigned char)*start)) start++;
+
+        // Trim trailing whitespace
+        char *end = start + strlen(start);
+        while (end > start && isspace((unsigned char)*(end - 1))) {
+            end--;
+            *end = '\0';
+        }
+
+        if (*start) {
+            // Lowercase
+            for (char *c = start; *c; c++) *c = tolower((unsigned char)*c);
+            new_rules[count] = strdup(start);
+            if (new_rules[count]) {
+                count++;
             }
-            if (*p == '"') {
-                *p = '\0';
-                // Filter out json keys like "rules", "version", etc.
-                if (strcasecmp(start, "rules") != 0 &&
-                    strcasecmp(start, "version") != 0 &&
-                    strlen(start) > 0) {
-                    
-                    // Canonicalize rule to lowercase
-                    for (char *c = start; *c; c++) *c = tolower((unsigned char)*c);
-                    new_rules[count] = strdup(start);
-                    if (new_rules[count]) {
-                        count++;
-                    }
-                }
-                p++;
-            }
-        } else {
-            p++;
         }
     }
 
-    free(buf);
+    fclose(f);
 
     free_rules_unlocked();
     g_table.rules = new_rules;
