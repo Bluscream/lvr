@@ -307,6 +307,46 @@ fn vrc_files_and_tools(app: &mut LvrApp, ui: &mut Ui) {
                 }
             }
             ui.end_row();
+
+            ui.label("DNS Shield (Steam)");
+            ui.horizontal(|ui| {
+                let shield_active = app.status.steam_shield_active;
+                let (status_text, color) = if shield_active {
+                    ("Installed in Steam", GREEN)
+                } else {
+                    ("Not in Steam Launch Options", ORANGE)
+                };
+
+                let opts_summary = if app.status.steam_launch_options.is_empty() {
+                    "No launch options set"
+                } else {
+                    &app.status.steam_launch_options
+                };
+                ui.label(RichText::new(status_text).size(12.0).color(color))
+                    .on_hover_text(format!("Current Steam LaunchOptions:\n{opts_summary}"));
+
+                let btn_label = if shield_active {
+                    "Remove from Steam"
+                } else {
+                    "Enable in Steam"
+                };
+                let btn_color = if shield_active { GREY } else { BLUE };
+                let btn = egui::Button::new(RichText::new(btn_label).size(11.0).strong())
+                    .corner_radius(egui::CornerRadius::same(6))
+                    .fill(btn_color.gamma_multiply(0.15))
+                    .stroke((1.0, btn_color.gamma_multiply(0.5)));
+
+                let tooltip = if shield_active {
+                    "Click to remove LD_PRELOAD DNS shield from VRChat's Steam launch options"
+                } else {
+                    "Click to automatically add LD_PRELOAD DNS shield to VRChat in Steam (localconfig.vdf)"
+                };
+
+                if ui.add(btn).on_hover_text(tooltip).clicked() {
+                    app.send(Command::SetSteamShieldEnabled(!shield_active));
+                }
+            });
+            ui.end_row();
         });
 
     let lists = crate::domain_block::active_domains();
