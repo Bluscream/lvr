@@ -1,6 +1,4 @@
 //! Build script for LinuxVR (`lvr`).
-//! Captures the latest VRChat remote config at compile time when network is available,
-//! falling back to the bundled offline fallback if network is unreachable.
 
 use std::fs;
 use std::path::Path;
@@ -8,18 +6,28 @@ use std::process::Command;
 
 fn main() {
     let out_dir = std::env::var("OUT_DIR").expect("OUT_DIR must be set");
-    let target_path = Path::new(&out_dir).join("vrchat_config_fallback.json");
-    let bundled_fallback = Path::new("assets/vrchat_config_fallback.json");
 
+    register_rerun_triggers();
+    check_no_legacy_code();
+    fetch_vrchat_config(&out_dir);
+    compile_dns_shield(&out_dir);
+}
+
+/// Tells Cargo which files should trigger a rebuild.
+fn register_rerun_triggers() {
     println!("cargo:rerun-if-changed=build.rs");
     println!("cargo:rerun-if-changed=assets/vrchat_config_fallback.json");
     println!("cargo:rerun-if-changed=c_src/dns_shield.c");
     println!("cargo:rerun-if-changed=src");
+}
 
-    check_no_legacy_code();
+/// Fetches the latest VRChat remote config at compile time when network is
+/// available, falling back to the bundled offline fallback otherwise.
+fn fetch_vrchat_config(out_dir: &str) {
+    let target_path = Path::new(out_dir).join("vrchat_config_fallback.json");
+    let bundled_fallback = Path::new("assets/vrchat_config_fallback.json");
 
-    let mut captured = false;
-    let output = Command::new("curl")
+    let fetched = Command::new("curl")
         .args([
             "-s",
             "--max-time",
@@ -28,30 +36,27 @@ fn main() {
             "lvr-builder/0.1.0",
             "https://api.vrchat.cloud/api/1/config",
         ])
-        .output();
+        .output()
+        .ok()
+        .filter(|out| out.status.success())
+        .and_then(|out| String::from_utf8(out.stdout).ok())
+        .filter(|text| text.contains("\"urlList\""))
+        .filter(|text| serde_json::from_str::<serde_json::Value>(text).is_ok())
+        .and_then(|text| fs::write(&target_path, &text).ok().map(|_| text));
 
-    if let Ok(out) = output
-        && out.status.success()
-        && let Ok(text) = std::str::from_utf8(&out.stdout)
-        && text.contains("\"urlList\"")
-        && serde_json::from_str::<serde_json::Value>(text).is_ok()
-        && fs::write(&target_path, text).is_ok()
-    {
-        captured = true;
-    }
-
-    if !captured {
-        let fallback_content = fs::read_to_string(bundled_fallback)
+    if fetched.is_none() {
+        let fallback = fs::read_to_string(bundled_fallback)
             .expect("bundled fallback config must exist in assets/");
-        fs::write(&target_path, fallback_content)
-            .expect("writing fallback config to OUT_DIR");
+        fs::write(&target_path, fallback).expect("writing fallback config to OUT_DIR");
     }
+}
 
-    // Compile c_src/dns_shield.c into liblvr_dns_shield.so shared library
+/// Compiles `c_src/dns_shield.c` into `liblvr_dns_shield.so` and embeds it.
+fn compile_dns_shield(out_dir: &str) {
     let shim_src = Path::new("c_src/dns_shield.c");
-    let shim_out = Path::new(&out_dir).join("liblvr_dns_shield.so");
+    let shim_out = Path::new(out_dir).join("liblvr_dns_shield.so");
 
-    let gcc_status = Command::new("gcc")
+    let ok = Command::new("gcc")
         .args([
             "-shared",
             "-fPIC",
@@ -64,14 +69,16 @@ fn main() {
             "-ldl",
             "-lpthread",
         ])
-        .status();
+        .status()
+        .map(|st| st.success())
+        .unwrap_or(false);
 
-    if let Ok(st) = gcc_status && st.success() {
-        // Also copy to c_src/liblvr_dns_shield.so for repository-local tests
-        let _ = fs::copy(&shim_out, "c_src/liblvr_dns_shield.so");
-    } else {
+    if !ok {
         panic!("Failed to compile liblvr_dns_shield.so with gcc");
     }
+
+    // Also copy to c_src/ for repository-local tests
+    let _ = fs::copy(&shim_out, "c_src/liblvr_dns_shield.so");
 }
 
 /// Scans all `.rs` files under `src/` and fails the build if any line
@@ -105,7 +112,7 @@ fn check_no_legacy_code() {
     visit_rs_files(src_dir, &mut |path, content| {
         for (line_no, line) in content.lines().enumerate() {
             let lower = line.to_lowercase();
-            // Skip lines that are entirely covered by an allowed exception
+            // Skip lines covered by an allowed exception
             if ALLOWED.iter().any(|&ok| lower.contains(&ok.to_lowercase())) {
                 continue;
             }
@@ -158,4 +165,3 @@ fn visit_rs_files(dir: &Path, cb: &mut impl FnMut(&Path, &str)) {
         }
     }
 }
-
