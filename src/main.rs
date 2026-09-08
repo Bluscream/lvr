@@ -546,4 +546,33 @@ mod tests {
             assert!(HELP.contains(flag), "{flag} missing from --help");
         }
     }
+
+    #[test]
+    fn source_files_under_1000_lines() {
+        let manifest_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+        let src_dir = manifest_dir.join("src");
+
+        fn check_dir(dir: &std::path::Path) {
+            for entry in std::fs::read_dir(dir).expect("read src directory") {
+                let entry = entry.expect("valid directory entry");
+                let path = entry.path();
+                if path.is_dir() {
+                    check_dir(&path);
+                } else if path.extension().is_some_and(|ext| ext == "rs") {
+                    let content = std::fs::read_to_string(&path)
+                        .unwrap_or_else(|e| panic!("failed to read {}: {e}", path.display()));
+                    let line_count = content.lines().count();
+                    assert!(
+                        line_count <= 1000,
+                        "Source file {} has {} lines, exceeding 1000 lines max!",
+                        path.display(),
+                        line_count
+                    );
+                }
+            }
+        }
+
+        check_dir(&src_dir);
+    }
 }
+

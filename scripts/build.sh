@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Build and install lvr (LinuxVR) into the current user's home.
+# Build, verify, and optionally deploy lvr (LinuxVR).
 # Nothing here needs root and nothing outside $HOME is touched.
 set -euo pipefail
 
@@ -10,17 +10,19 @@ AUTOSTART_DIR="${AUTOSTART_DIR:-$HOME/.config/autostart}"
 # Desktop-entry basename. Change it to install alongside another build of lvr
 # instead of replacing its menu entry.
 DESKTOP_ID="${DESKTOP_ID:-lvr}"
-SOURCE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SOURCE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
 autostart=ask
-action=install
+action=build
+deploy=no
 
 usage() {
     cat <<'EOF'
-Usage: ./install.sh [OPTIONS]
+Usage: ./scripts/build.sh [OPTIONS]
 
-  --autostart        Also start LinuxVR when you log in
-  --no-autostart     Do not touch the autostart entry
+  --deploy           Install/deploy lvr into $HOME/.local after building
+  --autostart        Also start LinuxVR when you log in (with --deploy)
+  --no-autostart     Do not touch the autostart entry (with --deploy)
   --uninstall        Remove everything this script installed
   -h, --help         Show this help
 
@@ -28,12 +30,13 @@ Environment overrides: BIN_DIR, APP_DIR, ICON_DIR, AUTOSTART_DIR, DESKTOP_ID
 
 DESKTOP_ID is the desktop-entry basename (default "lvr"). Set it to install
 alongside another build of lvr rather than replacing its menu entry, e.g.
-    DESKTOP_ID=lvr-opus ./install.sh
+    DESKTOP_ID=lvr-opus ./scripts/build.sh --deploy
 EOF
 }
 
 while [ $# -gt 0 ]; do
     case "$1" in
+        --deploy) deploy=yes ;;
         --autostart) autostart=yes ;;
         --no-autostart) autostart=no ;;
         --uninstall) action=uninstall ;;
@@ -63,7 +66,6 @@ if [ "$action" = uninstall ]; then
         [ -e "$target" ] || continue
         rm -f "$target"
         echo "  removed $target"
-        # Put back whatever we displaced when installing.
         restored=$(ls -1t "$target".bak-* 2>/dev/null | head -n1 || true)
         if [ -n "$restored" ]; then
             mv "$restored" "$target"
@@ -89,20 +91,25 @@ EOF
     exit 1
 fi
 
-echo "Building lvr (release)…"
+echo "==> Checking code with clippy (-D warnings)…"
+cargo clippy --all-targets --manifest-path "$SOURCE_DIR/Cargo.toml" -- -D warnings
+
+echo "==> Running test suite…"
+cargo test --manifest-path "$SOURCE_DIR/Cargo.toml"
+
+echo "==> Building lvr (release)…"
 cargo build --release --manifest-path "$SOURCE_DIR/Cargo.toml"
 
-# Never clobber a file we did not write: a differing file is copied aside first.
-# (An earlier build of lvr, or another project that claimed the same name.)
+if [ "$deploy" != yes ]; then
+    echo
+    echo "Build and quality checks completed successfully!"
+    echo "Run with --deploy to install to $BIN_DIR (e.g. ./scripts/build.sh --deploy)"
+    exit 0
+fi
+
 backups=()
 install_file() {
     local mode="$1" source="$2" target="$3"
-    # Displaced backup creation disabled per user request:
-    # if [ -e "$target" ] && ! cmp -s "$source" "$target"; then
-    #     local backup="$target.bak-$(date +%Y%m%d%H%M%S)"
-    #     cp -p "$target" "$backup"
-    #     backups+=("$backup")
-    # fi
     install -D"m$mode" "$source" "$target"
 }
 

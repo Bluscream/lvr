@@ -16,7 +16,7 @@ A lightweight tray app and GUI for managing Linux VR sessions (WiVRn, automatic 
 ### Install
 
 ```bash
-./install.sh
+./scripts/build.sh --deploy
 ```
 
 Installs binary, icon, and desktop entry to `~/.local`. Pass `--autostart` or `--no-autostart` to control login startup.
