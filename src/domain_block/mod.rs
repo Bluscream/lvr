@@ -38,7 +38,7 @@ pub enum BlockCategory {
     Video,
     Images,
     Strings,
-    Rest,
+    Shared,
     Custom(String),
 }
 
@@ -48,7 +48,7 @@ impl BlockCategory {
             Self::Video => "Video",
             Self::Images => "Images",
             Self::Strings => "Strings",
-            Self::Rest => "Rest",
+            Self::Shared => "Shared",
             Self::Custom(name) => name.as_str(),
         }
     }
@@ -58,7 +58,7 @@ impl BlockCategory {
             "Video" => Self::Video,
             "Images" => Self::Images,
             "Strings" => Self::Strings,
-            "Rest" => Self::Rest,
+            "Shared" | "Rest" => Self::Shared,
             custom => Self::Custom(custom.to_string()),
         }
     }
@@ -68,7 +68,7 @@ impl BlockCategory {
             Self::Video => "Video Players",
             Self::Images => "Image Loading",
             Self::Strings => "String Loading",
-            Self::Rest => "Shared & Rest",
+            Self::Shared => "Shared & Rest",
             Self::Custom(name) => name.as_str(),
         }
     }
@@ -78,7 +78,7 @@ impl BlockCategory {
             Self::Video => "Video",
             Self::Images => "Images",
             Self::Strings => "Strings",
-            Self::Rest => "Rest",
+            Self::Shared => "Shared",
             Self::Custom(name) => name.as_str(),
         }
     }
@@ -104,7 +104,7 @@ impl BlockCategory {
                 "VIDEO" => Self::Video,
                 "IMAGES" => Self::Images,
                 "STRINGS" => Self::Strings,
-                "REST" => Self::Rest,
+                "SHARED" | "REST" => Self::Shared,
                 custom => Self::Custom(custom.to_string()),
             });
         }
@@ -133,15 +133,24 @@ impl DomainLists {
         if !cats.iter().any(|c| matches!(c, BlockCategory::Strings)) {
             cats.push(BlockCategory::Strings);
         }
-        if !cats.iter().any(|c| matches!(c, BlockCategory::Rest)) {
-            cats.push(BlockCategory::Rest);
+        if !cats.iter().any(|c| matches!(c, BlockCategory::Shared)) {
+            cats.push(BlockCategory::Shared);
         }
         cats.sort();
+        cats.dedup();
         cats
     }
 
     pub fn count_for_category(&self, cat: &BlockCategory) -> usize {
-        self.domains.get(cat.name()).map(|v| v.len()).unwrap_or(0)
+        if let Some(v) = self.domains.get(cat.name()) {
+            return v.len();
+        }
+        if matches!(cat, BlockCategory::Shared)
+            && let Some(v) = self.domains.get("Rest")
+        {
+            return v.len();
+        }
+        0
     }
 
     pub fn total_count(&self) -> usize {
@@ -155,7 +164,7 @@ pub struct BlockState {
     pub video_blocked: bool,
     pub image_blocked: bool,
     pub string_blocked: bool,
-    pub rest_blocked: bool,
+    pub shared_blocked: bool,
     pub custom_blocked: BTreeMap<String, bool>,
 }
 
@@ -165,7 +174,7 @@ impl BlockState {
             BlockCategory::Video => self.video_blocked,
             BlockCategory::Images => self.image_blocked,
             BlockCategory::Strings => self.string_blocked,
-            BlockCategory::Rest => self.rest_blocked,
+            BlockCategory::Shared => self.shared_blocked,
             BlockCategory::Custom(name) => {
                 self.custom_blocked.get(name).copied().unwrap_or(false)
             }
@@ -177,7 +186,7 @@ impl BlockState {
             BlockCategory::Video => self.video_blocked = blocked,
             BlockCategory::Images => self.image_blocked = blocked,
             BlockCategory::Strings => self.string_blocked = blocked,
-            BlockCategory::Rest => self.rest_blocked = blocked,
+            BlockCategory::Shared => self.shared_blocked = blocked,
             BlockCategory::Custom(name) => {
                 self.custom_blocked.insert(name.clone(), blocked);
             }
@@ -525,13 +534,23 @@ mod tests {
             BlockCategory::Video,
             BlockCategory::Images,
             BlockCategory::Strings,
-            BlockCategory::Rest,
+            BlockCategory::Shared,
             BlockCategory::Custom("Analytics".to_string()),
         ] {
             let tag_line = format!("# DO NOT EDIT {} BEGIN", cat.tag_name());
             let parsed = BlockCategory::from_tag(&tag_line);
             assert_eq!(parsed, Some(cat));
         }
+
+        // Verify backward compatibility for legacy LVR_Rest tags
+        assert_eq!(
+            BlockCategory::from_tag("# DO NOT EDIT LVR_Rest BEGIN"),
+            Some(BlockCategory::Shared)
+        );
+        assert_eq!(
+            BlockCategory::from_tag("# ----- BEGIN LVR REST BLOCK -----"),
+            Some(BlockCategory::Shared)
+        );
     }
 
     #[test]
@@ -540,7 +559,7 @@ mod tests {
         assert!(parsed.contains_key("Video"));
         assert!(parsed.contains_key("Images"));
         assert!(parsed.contains_key("Strings"));
-        assert!(parsed.contains_key("Rest"));
+        assert!(parsed.contains_key("Shared"));
     }
 
     #[test]

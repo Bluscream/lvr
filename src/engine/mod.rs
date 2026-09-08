@@ -176,7 +176,7 @@ impl Engine {
                     lists.count_for_category(&crate::domain_block::BlockCategory::Video),
                     lists.count_for_category(&crate::domain_block::BlockCategory::Images),
                     lists.count_for_category(&crate::domain_block::BlockCategory::Strings),
-                    lists.count_for_category(&crate::domain_block::BlockCategory::Rest),
+                    lists.count_for_category(&crate::domain_block::BlockCategory::Shared),
                     lists.total_count()
                 ));
 

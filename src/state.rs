@@ -32,7 +32,7 @@ pub enum Command {
     CreateVirtualDisplay,
     /// Remove/disable virtual display manually or on trigger.
     RemoveVirtualDisplay,
-    /// Toggle media/domain blocking for a specific category (Video, Images, Strings, Rest).
+    /// Toggle media/domain blocking for a specific category (Video, Images, Strings, Shared).
     ToggleBlockCategory(crate::domain_block::BlockCategory),
     /// Reload or update active domain lists (e.g. after community blocklists toggle).
     ReloadDomainLists,
@@ -53,7 +53,7 @@ pub struct Status {
     pub default_source: String,
     pub audio_on_vr: bool,
     pub entries: Vec<EntryStatus>,
-    /// Active blocking state for Video, Images, Strings, and Rest.
+    /// Active blocking state for Video, Images, Strings, and Shared.
     pub block_state: crate::domain_block::BlockState,
     pub sinks: Vec<AudioDevice>,
     pub sources: Vec<AudioDevice>,

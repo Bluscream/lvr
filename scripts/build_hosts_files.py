@@ -15,13 +15,13 @@ Pipeline:
    - Any custom community keys (e.g. "Analytics") -> Custom category name
 6. Filters out protected core VRChat domains and whiteListedAssetUrls.
 7. Enforces mutual exclusivity: any domain that appears in >= 2 categories is removed from
-   those categories and assigned exclusively to the "Rest" category.
+   those categories and assigned exclusively to the "Shared" category.
 8. Writes out clean, individual category hosts files into assets/lists/hosts/:
    - Video.hosts
    - Images.hosts
    - Strings.hosts
    - Analytics.hosts (and any other custom categories)
-   - Rest.hosts
+   - Shared.hosts
    Each host entry includes its www.* equivalent and a trailing comment `# <sources>`.
 """
 
@@ -235,7 +235,7 @@ def main():
                 expanded_domains_by_cat[cat].add(d)
 
     # 7. Enforce Category Mutual Exclusivity
-    # Any canonical key present in >= 2 categories moves to "Rest"
+    # Any canonical key present in >= 2 categories moves to "Shared"
     cat_by_key = defaultdict(set)
     for cat, d_set in expanded_domains_by_cat.items():
         for d in d_set:
@@ -244,17 +244,17 @@ def main():
     multi_keys = {k for k, cats in cat_by_key.items() if len(cats) >= 2}
 
     final_categories = defaultdict(list)
-    rest_set = set()
+    shared_set = set()
 
     for cat, d_set in expanded_domains_by_cat.items():
         for d in d_set:
             ckey = canonical_domain_key(d)
             if ckey in multi_keys:
-                rest_set.add(d)
+                shared_set.add(d)
             else:
                 final_categories[cat].append(d)
 
-    final_categories["Rest"] = list(rest_set)
+    final_categories["Shared"] = list(shared_set)
 
     # 7. Write out category .hosts files to assets/lists/hosts/
     HOSTS_OUT_DIR.mkdir(parents=True, exist_ok=True)

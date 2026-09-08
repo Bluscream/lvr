@@ -104,7 +104,7 @@ fn is_protected(domain: &str, protected_set: &HashSet<String>) -> bool {
 /// - Video: from `urlList`
 /// - Images: from `imageHostUrlList`
 /// - Strings: from `stringHostUrlList`
-/// - Rest: Any domain appearing in >1 category
+/// - Shared: Any domain appearing in >1 category
 ///
 /// Automatically expands wildcards `*.domain.tld` into `domain.tld` and `www.domain.tld`.
 pub fn parse_vrchat_config_to_categories(json_str: &str) -> Result<BTreeMap<String, Vec<String>>> {
@@ -165,7 +165,7 @@ pub fn parse_vrchat_config_to_categories(json_str: &str) -> Result<BTreeMap<Stri
         expanded_by_cat.insert(cat, expanded);
     }
 
-    // 4. Mutual Exclusivity: Move any domain in >= 2 categories to "Rest"
+    // 4. Mutual Exclusivity: Move any domain in >= 2 categories to "Shared"
     let mut cat_by_key: BTreeMap<String, HashSet<&str>> = BTreeMap::new();
     for (cat, d_set) in &expanded_by_cat {
         for d in d_set {
@@ -181,14 +181,14 @@ pub fn parse_vrchat_config_to_categories(json_str: &str) -> Result<BTreeMap<Stri
         .collect();
 
     let mut result: BTreeMap<String, Vec<String>> = BTreeMap::new();
-    let mut rest_set: HashSet<String> = HashSet::new();
+    let mut shared_set: HashSet<String> = HashSet::new();
 
     for (cat, d_set) in expanded_by_cat {
         let mut pure = Vec::new();
         for d in d_set {
             let key = canonical_domain_key(&d);
             if multi_keys.contains(&key) {
-                rest_set.insert(d);
+                shared_set.insert(d);
             } else {
                 pure.push(d);
             }
@@ -197,9 +197,9 @@ pub fn parse_vrchat_config_to_categories(json_str: &str) -> Result<BTreeMap<Stri
         result.insert(cat.to_string(), pure);
     }
 
-    let mut rest_list: Vec<String> = rest_set.into_iter().collect();
-    rest_list.sort();
-    result.insert("Rest".to_string(), rest_list);
+    let mut shared_list: Vec<String> = shared_set.into_iter().collect();
+    shared_list.sort();
+    result.insert("Shared".to_string(), shared_list);
 
     Ok(result)
 }
