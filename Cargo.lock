@@ -1570,15 +1570,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7f24254aa9a54b5c858eaee2f5bccdb46aaf0e486a595ed5fd8f86ba55232a70"
 
 [[package]]
-name = "hostsfile"
-version = "2.0.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "43665a87b9638365ef327dc6afb0bf52e3a1f02078a643c6612bceecbd164991"
-dependencies = [
- "log",
-]
-
-[[package]]
 name = "http"
 version = "1.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2070,7 +2061,6 @@ dependencies = [
  "eframe",
  "egui",
  "egui_extras",
- "hostsfile",
  "ksni",
  "libc",
  "reqwest",

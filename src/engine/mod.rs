@@ -69,9 +69,7 @@ impl Engine {
             cached_sources: Vec::new(),
             cached_default_sink: String::new(),
             cached_default_source: String::new(),
-            block_state: crate::domain_block::detect_vrc_prefix("")
-                .map(|p| crate::domain_block::read_block_state(&p))
-                .unwrap_or_default(),
+            block_state: crate::domain_block::BlockState::default(),
             last_media_block_poll: None,
             virtual_display_created: false,
             virtual_display_info: None,
@@ -188,9 +186,9 @@ impl Engine {
                 self.last_audio_poll = None;
                 self.last_media_block_poll = None;
 
-                // Re-read prefix block state immediately
+                // Re-sync block state to shield rules to ensure consistency
                 if let Some(prefix) = crate::domain_block::detect_vrc_prefix("") {
-                    self.block_state = crate::domain_block::read_block_state(&prefix);
+                    let _ = crate::domain_block::sync_all(&prefix, &self.block_state);
                 }
 
                 // Reload domains
@@ -398,37 +396,43 @@ impl Engine {
     }
 
     fn refresh_media_block_cache(&mut self) {
+        // Block state is managed in-memory; nothing to poll from disk.
+        // This method is kept as a hook for future refresh logic.
         if let Some(last) = self.last_media_block_poll
             && last.elapsed() < MEDIA_BLOCK_POLL_INTERVAL
         {
             return;
         }
         self.last_media_block_poll = Some(Instant::now());
-
-        if let Some(prefix) = crate::domain_block::detect_vrc_prefix("") {
-            self.block_state = crate::domain_block::read_block_state(&prefix);
-        }
     }
 
     async fn set_block_category(&mut self, category: crate::domain_block::BlockCategory, block: bool) {
-        let Some(prefix) = crate::domain_block::detect_vrc_prefix("") else {
-            self.shared.error("Could not find VRChat Proton prefix to toggle media blocking");
-            return;
-        };
-
-        match crate::domain_block::set_category_blocked(&prefix, &category, block) {
-            Ok(()) => {
-                self.block_state.set_blocked(&category, block);
-                let label = category.label();
-                if block {
-                    self.shared.warn(format!("VRChat {label} BLOCKED"));
-                } else {
-                    self.shared.info(format!("VRChat {label} ALLOWED (unblocked)"));
+        self.block_state.set_blocked(&category, block);
+        if let Some(prefix) = crate::domain_block::detect_vrc_prefix("") {
+            match crate::domain_block::sync_all(&prefix, &self.block_state) {
+                Ok(()) => {
+                    let label = category.label();
+                    if block {
+                        self.shared.warn(format!("VRChat {label} BLOCKED"));
+                    } else {
+                        self.shared.info(format!("VRChat {label} ALLOWED (unblocked)"));
+                    }
+                }
+                Err(err) => {
+                    self.shared.error(format!("Failed to sync {category:?} blocking state: {err:#}"));
+                    // Roll back in-memory state
+                    self.block_state.set_blocked(&category, !block);
                 }
             }
-            Err(err) => {
-                self.shared.error(format!("Failed to update {category:?} blocking state: {err:#}"));
+        } else {
+            let label = category.label();
+            if block {
+                self.shared.warn(format!("VRChat {label} BLOCKED (no prefix found, shield-only)"));
+            } else {
+                self.shared.info(format!("VRChat {label} ALLOWED (no prefix found, shield-only)"));
             }
+            // Still sync dns_shield even without a prefix
+            let _ = crate::domain_block::dns_shield::sync_shield_rules(&self.block_state);
         }
     }
 }
@@ -516,9 +520,7 @@ pub async fn probe(config: &Config) -> Status {
         default_source,
         audio_on_vr,
         entries,
-        block_state: crate::domain_block::detect_vrc_prefix("")
-            .map(|p| crate::domain_block::read_block_state(&p))
-            .unwrap_or_default(),
+        block_state: crate::domain_block::BlockState::default(),
         sinks: audio::list_devices(Kind::Sink).await.unwrap_or_default(),
         sources: audio::list_devices(Kind::Source).await.unwrap_or_default(),
         virtual_display_created: false,

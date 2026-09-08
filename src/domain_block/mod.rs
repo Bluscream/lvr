@@ -4,8 +4,8 @@
 //! with fallback to live official VRChat remote config, and final fallback
 //! to embedded compile-time VRChat config.
 //!
-//! Uses `hostsfile::HostsBuilder` to manage tagged block sections in the
-//! VRChat Proton prefix hosts file.
+//! Domain blocking is enforced via the DNS shield (`liblvr_dns_shield.so`) and
+//! yt-dlp stub; the legacy Proton prefix hosts file is no longer used.
 
 use std::collections::BTreeMap;
 use std::fs;
@@ -82,7 +82,7 @@ impl BlockCategory {
         self.label()
     }
 
-    /// Returns the tag used by `hostsfile::HostsBuilder` (e.g. `LVR_Videos`).
+    /// Returns the tag name for this category (e.g. `LVR_Videos`).
     pub fn tag_name(&self) -> String {
         format!("LVR_{}", self.name())
     }
@@ -385,108 +385,17 @@ fn expand_tilde(path: &str) -> String {
     }
 }
 
-pub fn prefix_hosts_path(prefix: &Path) -> PathBuf {
-    prefix.join("pfx/drive_c/windows/system32/drivers/etc/hosts")
-}
-
 pub fn vrc_tools_dir(prefix: &Path) -> PathBuf {
     prefix.join("pfx/drive_c/users/steamuser/AppData/LocalLow/VRChat/VRChat/Tools")
 }
 
-/// Read current blocking state of all categories from prefix hosts file.
-pub fn read_block_state(prefix: &Path) -> BlockState {
-    let hosts_path = prefix_hosts_path(prefix);
-    let content = fs::read_to_string(&hosts_path).unwrap_or_default();
-    let mut state = BlockState::default();
-
-    for line in content.lines() {
-        if let Some(cat) = BlockCategory::from_tag(line.trim()) {
-            state.set_blocked(&cat, true);
-        }
-    }
-
-    state
-}
-
-/// Set the blocking state for a given category.
-pub fn set_category_blocked(prefix: &Path, category: &BlockCategory, block: bool) -> Result<()> {
-    let mut state = read_block_state(prefix);
-    state.set_blocked(category, block);
-    sync_all(prefix, &state)?;
-    Ok(())
-}
-
-/// Apply full block state (hosts + yt-dlp + dns_shield rules) cleanly in one atomic operation.
+/// Apply full block state (yt-dlp stub + dns_shield rules) cleanly in one atomic operation.
 pub fn sync_all(prefix: &Path, state: &BlockState) -> Result<()> {
-    update_hosts_file(prefix, state)?;
     update_ytdlp_file(prefix, state.video_blocked)?;
     let _ = dns_shield::sync_shield_rules(state);
     Ok(())
 }
 
-/// Removes legacy LVR comments if present in the hosts file.
-fn strip_legacy_lvr_blocks(content: &str) -> String {
-    let mut cleaned = Vec::new();
-    let mut inside_lvr_block = false;
-
-    for line in content.lines() {
-        let trimmed = line.trim();
-        if trimmed.starts_with("# ----- BEGIN LVR ") && trimmed.ends_with(" BLOCK -----") {
-            inside_lvr_block = true;
-            continue;
-        }
-        if inside_lvr_block {
-            if trimmed.starts_with("# ----- END LVR ") && trimmed.ends_with(" BLOCK -----") {
-                inside_lvr_block = false;
-            }
-            continue;
-        }
-        cleaned.push(line);
-    }
-    cleaned.join("\n")
-}
-
-/// Updates the hosts file in the Proton prefix using `hostsfile::HostsBuilder`.
-pub fn update_hosts_file(prefix: &Path, state: &BlockState) -> Result<()> {
-    let hosts_path = prefix_hosts_path(prefix);
-    if let Some(parent) = hosts_path.parent() {
-        fs::create_dir_all(parent)?;
-    }
-
-    if hosts_path.is_file() {
-        let existing = fs::read_to_string(&hosts_path).unwrap_or_default();
-        if existing.contains("# ----- BEGIN LVR ") {
-            let cleaned = strip_legacy_lvr_blocks(&existing);
-            fs::write(&hosts_path, cleaned)?;
-        }
-    } else {
-        fs::write(&hosts_path, "127.0.0.1 localhost\n::1 localhost\n")?;
-    }
-
-    let lists = active_domains();
-    let zero_ip: IpAddr = "0.0.0.0".parse()?;
-
-    for cat in lists.all_categories() {
-        let mut builder = hostsfile::HostsBuilder::new(cat.tag_name());
-        if state.is_blocked(&cat)
-            && let Some(domain_list) = lists.domains.get(cat.name())
-        {
-            let valid_hostnames: Vec<&String> = domain_list
-                .iter()
-                .filter(|d| d.parse::<IpAddr>().is_err() && !d.trim_start_matches("*.").parse::<IpAddr>().is_ok())
-                .collect();
-            if !valid_hostnames.is_empty() {
-                builder.add_hostnames(zero_ip, valid_hostnames);
-            }
-        }
-
-        // If unblocked (empty builder), hostsfile automatically deletes the section!
-        builder.write_to(&hosts_path)
-            .map_err(|e| anyhow::anyhow!("Failed writing hosts file with hostsfile crate: {e}"))?;
-    }
-
-    Ok(())
-}
 
 fn update_ytdlp_file(prefix: &Path, block_video: bool) -> Result<()> {
     let tools_dir = vrc_tools_dir(prefix);
@@ -599,36 +508,6 @@ mod tests {
         assert!(parsed.contains_key("Shared"));
     }
 
-    #[test]
-    fn hostsfile_builder_sync_and_unblock() {
-        let temp_dir = std::env::temp_dir().join("lvr_hostsfile_test");
-        let _ = fs::remove_dir_all(&temp_dir);
-        fs::create_dir_all(&temp_dir).unwrap();
-
-        let hosts_path = temp_dir.join("hosts");
-        fs::write(&hosts_path, "127.0.0.1 localhost\n::1 localhost\n").unwrap();
-
-        // 1. Write block for Videos
-        let mut builder = hostsfile::HostsBuilder::new(BlockCategory::Videos.tag_name());
-        let zero_ip: IpAddr = "0.0.0.0".parse().unwrap();
-        builder.add_hostnames(zero_ip, ["youtube.com", "twitch.tv"]);
-        builder.write_to(&hosts_path).unwrap();
-
-        let content = fs::read_to_string(&hosts_path).unwrap();
-        assert!(content.contains("# DO NOT EDIT LVR_Videos BEGIN"));
-        assert!(content.contains("0.0.0.0 youtube.com twitch.tv"));
-        assert!(content.contains("# DO NOT EDIT LVR_Videos END"));
-
-        // 2. Clear block for Videos (empty builder)
-        let empty_builder = hostsfile::HostsBuilder::new(BlockCategory::Videos.tag_name());
-        empty_builder.write_to(&hosts_path).unwrap();
-
-        let cleared_content = fs::read_to_string(&hosts_path).unwrap();
-        assert!(!cleared_content.contains("LVR_Videos"));
-        assert!(!cleared_content.contains("youtube.com"));
-
-        let _ = fs::remove_dir_all(&temp_dir);
-    }
 
     #[test]
     fn sanitize_domain_map_strips_ip_addresses() {
