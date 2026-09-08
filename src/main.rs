@@ -13,6 +13,7 @@ mod state;
 mod tray;
 mod ui;
 mod domain_block;
+mod steam;
 mod wivrn;
 
 use std::path::{Path, PathBuf};
