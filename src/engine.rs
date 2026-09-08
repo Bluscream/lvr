@@ -262,8 +262,9 @@ impl Engine {
 
     pub async fn run(mut self) {
         self.shared.info("Supervisor started");
-        tokio::spawn(async {
-            crate::domain_block::init_from_remote_or_fallback().await;
+        let load_community = self.shared.config().domain_block.load_community_blocklists;
+        tokio::spawn(async move {
+            crate::domain_block::init_from_remote_or_fallback(load_community).await;
         });
         if self.shared.config().virtual_display.create_on_startup {
             let physical_count = display::get_connected_display_count();
@@ -337,6 +338,21 @@ impl Engine {
             }
             Command::SetBlockCategory(category, block) => {
                 self.set_block_category(category, block).await;
+            }
+            Command::ReloadDomainLists => {
+                let load_community = self.shared.config().domain_block.load_community_blocklists;
+                let lists = crate::domain_block::reload_domain_lists(load_community).await;
+                if let Some(prefix) = crate::domain_block::detect_vrc_prefix("") {
+                    let _ = crate::domain_block::sync_all(&prefix, self.block_state);
+                }
+                self.shared.info(format!(
+                    "Updated active domain lists: {} videos, {} images, {} strings, {} shared (community lists: {})",
+                    lists.video_domains.len(),
+                    lists.image_domains.len(),
+                    lists.string_domains.len(),
+                    lists.rest_domains.len(),
+                    if load_community { "enabled" } else { "disabled" }
+                ));
             }
             Command::CreateVirtualDisplay => {
                 self.pending_virtual_display_action = None;

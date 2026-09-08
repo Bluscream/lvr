@@ -270,14 +270,49 @@ fn vrchat(app: &mut LvrApp, ui: &mut Ui) {
     }
 }
 
-fn vrc_files_and_tools(_app: &mut LvrApp, ui: &mut Ui) {
-    widgets::heading(ui, "VRChat prefix & tools");
+fn vrc_files_and_tools(app: &mut LvrApp, ui: &mut Ui) {
+    widgets::heading(ui, "VRChat & Domain Shield");
     ui.label(
         RichText::new(
-            "Quick access to the VRChat Proton prefix hosts file (for video/image/string blocking) \
-             and the VRChat Tools folder (where yt-dlp.exe is located).",
+            "Configure media blocking domain shields, community blocklist integration, \
+             and access VRChat Proton prefix files.",
         )
         .size(13.0)
+        .color(GREY),
+    );
+    ui.add_space(6.0);
+
+    egui::Grid::new("settings-vrc-domain-block")
+        .num_columns(2)
+        .spacing([14.0, 12.0])
+        .min_col_width(190.0)
+        .show(ui, |ui| {
+            ui.label("Load Community Blocklists");
+            {
+                let mut config = app.shared.config();
+                if widgets::toggle(
+                    ui,
+                    &mut config.domain_block.load_community_blocklists,
+                    "merge community video, image, and string domains into active shield",
+                ) {
+                    app.send(Command::ReloadDomainLists);
+                    app.send(Command::SaveConfig);
+                }
+            }
+            ui.end_row();
+        });
+
+    let lists = crate::domain_block::active_domains();
+    ui.add_space(2.0);
+    ui.label(
+        RichText::new(format!(
+            "Active blocklist domains: {} video · {} image · {} string · {} shared (rest)",
+            lists.video_domains.len(),
+            lists.image_domains.len(),
+            lists.string_domains.len(),
+            lists.rest_domains.len()
+        ))
+        .size(11.0)
         .color(GREY),
     );
     ui.add_space(6.0);

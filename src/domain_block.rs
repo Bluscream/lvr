@@ -28,7 +28,16 @@ pub enum BlockCategory {
 }
 
 use std::collections::HashSet;
-use std::sync::OnceLock;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, RwLock};
+
+/// Embedded copy of VRChat remote config (`https://api.vrchat.cloud/api/1/config`)
+/// captured at compile time as a fallback whenever the network is unavailable.
+const EMBEDDED_FALLBACK_CONFIG: &str = include_str!("../assets/vrchat_config_fallback.json");
+
+/// Remote URL for community blocklists extracted from community sources and logs.
+pub const COMMUNITY_CONFIG_URL: &str =
+    "https://github.com/Bluscream/lvr/raw/refs/heads/main/assets/lists/config.json";
 
 /// Dynamic or fallback domain store for all categories.
 #[derive(Debug, Clone)]
@@ -41,40 +50,309 @@ pub struct DomainLists {
     pub protected_domains: Vec<String>,
 }
 
-static ACTIVE_DOMAIN_LISTS: OnceLock<DomainLists> = OnceLock::new();
+static ACTIVE_DOMAIN_LISTS: RwLock<Option<Arc<DomainLists>>> = RwLock::new(None);
+static LATEST_VRC_CONFIG_JSON: RwLock<Option<String>> = RwLock::new(None);
+static LATEST_COMMUNITY_CONFIG_JSON: RwLock<Option<String>> = RwLock::new(None);
+static LOAD_COMMUNITY_ENABLED: AtomicBool = AtomicBool::new(true);
 
-/// Returns the currently active domain lists, initializing from remote VRChat config or falling back to hardcoded.
-pub fn active_domains() -> &'static DomainLists {
-    ACTIVE_DOMAIN_LISTS.get_or_init(build_domain_lists_fallback)
+/// Maximum age for the local cached community blocklist before redownloading (1 hour).
+pub const COMMUNITY_CACHE_MAX_AGE: std::time::Duration = std::time::Duration::from_secs(3600);
+
+/// Primary file path where downloaded community blocklist JSON is cached.
+pub fn community_cache_path() -> PathBuf {
+    directories::ProjectDirs::from("", "", "lvr")
+        .map(|dirs| dirs.cache_dir().join("community_config.json"))
+        .unwrap_or_else(|| PathBuf::from("assets/lists/config.json"))
 }
 
-/// Try to fetch live VRChat config asynchronously and initialize active domain lists.
-pub async fn init_from_remote_or_fallback() {
-    if ACTIVE_DOMAIN_LISTS.get().is_some() {
-        return;
+/// Checks whether a file exists and is less than the given maximum age.
+#[allow(dead_code)]
+pub fn is_file_fresh(path: &Path, max_age: std::time::Duration) -> bool {
+    fs::metadata(path)
+        .ok()
+        .and_then(|m| m.modified().ok())
+        .and_then(|t| t.elapsed().ok())
+        .map(|elapsed| elapsed < max_age)
+        .unwrap_or(false)
+}
+
+/// Returns the path, age, and content of the newest existing local community config file.
+pub fn get_newest_local_community_file() -> Option<(PathBuf, std::time::Duration, String)> {
+    let mut candidates = Vec::new();
+    candidates.push(community_cache_path());
+    if let Some(dirs) = directories::ProjectDirs::from("", "", "lvr") {
+        candidates.push(dirs.config_dir().join("community_config.json"));
     }
-    let lists = match fetch_remote_config().await {
-        Ok(parsed) => {
-            tracing::info!(
-                "Successfully built media blocking domain lists dynamically from live VRChat config (videos: {}, images: {}, strings: {}, rest: {})",
-                parsed.video_domains.len(),
-                parsed.image_domains.len(),
-                parsed.string_domains.len(),
-                parsed.rest_domains.len()
+    candidates.push(PathBuf::from("assets/lists/config.json"));
+    candidates.push(PathBuf::from("/run/media/system/Data/Projects/lvr/assets/lists/config.json"));
+
+    let mut best: Option<(PathBuf, std::time::Duration, String)> = None;
+
+    for path in &candidates {
+        if let Ok(meta) = fs::metadata(path) {
+            if let Ok(modified) = meta.modified() {
+                if let Ok(elapsed) = modified.elapsed() {
+                    if let Ok(content) = fs::read_to_string(path) {
+                        if !content.trim().is_empty() {
+                            match best {
+                                Some((_, best_elapsed, _)) if elapsed < best_elapsed => {
+                                    best = Some((path.clone(), elapsed, content));
+                                }
+                                None => {
+                                    best = Some((path.clone(), elapsed, content));
+                                }
+                                _ => {}
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    best
+}
+
+/// Returns local community config content only if a local file exists and is less than 1 hour old.
+pub fn get_fresh_local_community_config() -> Option<String> {
+    if let Some((path, elapsed, content)) = get_newest_local_community_file() {
+        if elapsed < COMMUNITY_CACHE_MAX_AGE {
+            tracing::debug!(
+                "Local community config at {} is fresh (age: {}s < 3600s), skipping redownload",
+                path.display(),
+                elapsed.as_secs()
             );
-            parsed
+            return Some(content);
+        }
+    }
+    None
+}
+
+/// Unconditionally downloads the community config JSON from GitHub and saves it to local cache.
+pub async fn fetch_community_config_remote() -> Result<String> {
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(8))
+        .user_agent("lvr/0.1.0")
+        .build()?;
+
+    let response = client
+        .get(COMMUNITY_CONFIG_URL)
+        .send()
+        .await?;
+
+    if !response.status().is_success() {
+        anyhow::bail!("Community config request failed with HTTP status {}", response.status());
+    }
+
+    let text = response.text().await?;
+
+    // Save to local cache path
+    let cache_path = community_cache_path();
+    if let Some(parent) = cache_path.parent() {
+        let _ = fs::create_dir_all(parent);
+    }
+    if let Err(e) = fs::write(&cache_path, &text) {
+        tracing::warn!("Failed to save community config cache to {}: {e}", cache_path.display());
+    } else {
+        tracing::info!("Saved fresh community config to {}", cache_path.display());
+    }
+
+    Ok(text)
+}
+
+/// Fetches the community config JSON, redownloading only if the local file is missing or over 1 hour old.
+pub async fn fetch_community_config() -> Result<String> {
+    // Check if we have a fresh local file (< 1 hour old)
+    if let Some(fresh_content) = get_fresh_local_community_config() {
+        return Ok(fresh_content);
+    }
+
+    tracing::info!("Local community config is missing or over 1h old; redownloading from {COMMUNITY_CONFIG_URL}");
+    match fetch_community_config_remote().await {
+        Ok(text) => Ok(text),
+        Err(err) => {
+            // Fall back to stale local file if available when network fails
+            if let Some((path, elapsed, stale_content)) = get_newest_local_community_file() {
+                tracing::warn!(
+                    "Failed to redownload community config ({err:#}); falling back to stale local file {} (age: {}s)",
+                    path.display(),
+                    elapsed.as_secs()
+                );
+                Ok(stale_content)
+            } else {
+                Err(err)
+            }
+        }
+    }
+}
+
+/// Returns the community config JSON from memory cache, local disk cache, or repository file if present.
+/// Note: Community blocklist is NEVER embedded at compile-time.
+pub fn get_community_config_json() -> Option<String> {
+    if let Ok(guard) = LATEST_COMMUNITY_CONFIG_JSON.read() {
+        if let Some(ref json) = *guard {
+            if !json.trim().is_empty() {
+                return Some(json.clone());
+            }
+        }
+    }
+    get_newest_local_community_file().map(|(_, _, content)| content)
+}
+
+/// Returns the currently active domain lists, initializing from remote VRChat config or falling back to hardcoded.
+pub fn active_domains() -> Arc<DomainLists> {
+    if let Ok(guard) = ACTIVE_DOMAIN_LISTS.read() {
+        if let Some(lists) = guard.as_ref() {
+            return Arc::clone(lists);
+        }
+    }
+    let load_comm = LOAD_COMMUNITY_ENABLED.load(Ordering::Relaxed);
+    let fallback = Arc::new(build_domain_lists_fallback_with_community(load_comm));
+    if let Ok(mut guard) = ACTIVE_DOMAIN_LISTS.write() {
+        if guard.is_none() {
+            *guard = Some(Arc::clone(&fallback));
+        }
+    }
+    fallback
+}
+
+/// Rebuilds and updates `ACTIVE_DOMAIN_LISTS` dynamically (e.g. when toggling community blocklists).
+pub async fn reload_domain_lists(load_community: bool) -> Arc<DomainLists> {
+    LOAD_COMMUNITY_ENABLED.store(load_community, Ordering::Relaxed);
+    let comm_json = if load_community {
+        match fetch_community_config().await {
+            Ok(json) => {
+                if let Ok(mut guard) = LATEST_COMMUNITY_CONFIG_JSON.write() {
+                    *guard = Some(json.clone());
+                }
+                Some(json)
+            }
+            Err(err) => {
+                tracing::warn!("Failed to fetch community config from {COMMUNITY_CONFIG_URL} ({err:#}); using cached if available");
+                get_community_config_json()
+            }
+        }
+    } else {
+        None
+    };
+
+    let vrc_json = LATEST_VRC_CONFIG_JSON
+        .read()
+        .ok()
+        .and_then(|g| g.clone());
+
+    let lists = match vrc_json {
+        Some(ref body) => {
+            parse_vrchat_and_community_config_json(body, comm_json.as_deref())
+                .unwrap_or_else(|_| build_domain_lists_fallback_with_community_json(comm_json.as_deref()))
+        }
+        None => build_domain_lists_fallback_with_community_json(comm_json.as_deref()),
+    };
+
+    let arc = Arc::new(lists);
+    if let Ok(mut guard) = ACTIVE_DOMAIN_LISTS.write() {
+        *guard = Some(Arc::clone(&arc));
+    }
+    arc
+}
+
+/// Try to fetch live VRChat config and community config asynchronously and initialize active domain lists.
+pub async fn init_from_remote_or_fallback(load_community: bool) {
+    LOAD_COMMUNITY_ENABLED.store(load_community, Ordering::Relaxed);
+    let comm_json = if load_community {
+        match fetch_community_config().await {
+            Ok(json) => {
+                if let Ok(mut guard) = LATEST_COMMUNITY_CONFIG_JSON.write() {
+                    *guard = Some(json.clone());
+                }
+                Some(json)
+            }
+            Err(err) => {
+                tracing::warn!("Failed to fetch community config from {COMMUNITY_CONFIG_URL} ({err:#}); checking cached or local fallback");
+                get_community_config_json()
+            }
+        }
+    } else {
+        None
+    };
+
+    let lists = match fetch_remote_config().await {
+        Ok(body) => {
+            if let Ok(mut guard) = LATEST_VRC_CONFIG_JSON.write() {
+                *guard = Some(body.clone());
+            }
+            let merged = parse_vrchat_and_community_config_json(&body, comm_json.as_deref())
+                .unwrap_or_else(|_| build_domain_lists_fallback_with_community_json(comm_json.as_deref()));
+            tracing::info!(
+                "Successfully built media blocking domain lists dynamically from live VRChat config (videos: {}, images: {}, strings: {}, rest: {}, community: {})",
+                merged.video_domains.len(),
+                merged.image_domains.len(),
+                merged.string_domains.len(),
+                merged.rest_domains.len(),
+                load_community
+            );
+            merged
         }
         Err(err) => {
             tracing::warn!("Failed to fetch live VRChat config ({err:#}); falling back to hardcoded domain lists");
-            build_domain_lists_fallback()
+            build_domain_lists_fallback_with_community_json(comm_json.as_deref())
         }
     };
-    let _ = ACTIVE_DOMAIN_LISTS.set(lists);
+
+    if let Ok(mut guard) = ACTIVE_DOMAIN_LISTS.write() {
+        *guard = Some(Arc::new(lists));
+    }
+}
+
+#[allow(dead_code)]
+pub fn build_domain_lists_fallback() -> DomainLists {
+    build_domain_lists_fallback_with_community(LOAD_COMMUNITY_ENABLED.load(Ordering::Relaxed))
+}
+
+pub fn build_domain_lists_fallback_with_community(load_community: bool) -> DomainLists {
+    let comm_json = if load_community {
+        get_community_config_json()
+    } else {
+        None
+    };
+    build_domain_lists_fallback_with_community_json(comm_json.as_deref())
+}
+
+pub fn build_domain_lists_fallback_with_community_json(comm_json: Option<&str>) -> DomainLists {
+    parse_vrchat_and_community_config_json(EMBEDDED_FALLBACK_CONFIG, comm_json)
+        .expect("fallback VRChat config JSON must always be valid")
+}
+
+async fn fetch_remote_config() -> Result<String> {
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(5))
+        .user_agent("lvr/0.1.0")
+        .build()?;
+
+    let response = client
+        .get("https://api.vrchat.cloud/api/1/config")
+        .send()
+        .await?;
+
+    if !response.status().is_success() {
+        anyhow::bail!("VRChat config request failed with HTTP status {}", response.status());
+    }
+
+    Ok(response.text().await?)
 }
 
 /// Parse raw JSON from VRChat `/api/1/config` and partition domains strictly into pure video, image, string sets.
+#[allow(dead_code)]
 pub fn parse_vrchat_config_json(json_str: &str) -> Result<DomainLists> {
-    #[derive(Deserialize)]
+    parse_vrchat_and_community_config_json(json_str, None)
+}
+
+/// Parse VRChat config and optionally merge community blocklists, smartly enforcing safety invariants.
+pub fn parse_vrchat_and_community_config_json(
+    vrc_json_str: &str,
+    community_json_str: Option<&str>,
+) -> Result<DomainLists> {
+    #[derive(Deserialize, Default)]
     struct VrcRemoteConfig {
         #[serde(default, rename = "urlList")]
         url_list: Vec<String>,
@@ -86,34 +364,62 @@ pub fn parse_vrchat_config_json(json_str: &str) -> Result<DomainLists> {
         asset_urls: Vec<String>,
     }
 
-    let parsed: VrcRemoteConfig = serde_json::from_str(json_str)?;
+    let parsed_vrc: VrcRemoteConfig = serde_json::from_str(vrc_json_str)?;
+    let parsed_community: Option<VrcRemoteConfig> = match community_json_str {
+        Some(s) if !s.trim().is_empty() => serde_json::from_str(s).ok(),
+        _ => None,
+    };
 
     let mut raw_video: HashSet<String> = HashSet::new();
-    for u in parsed.url_list {
+    for u in parsed_vrc.url_list {
         let cleaned = clean_domain_entry(&u);
         if !cleaned.is_empty() {
             raw_video.insert(cleaned);
         }
     }
+    if let Some(ref comm) = parsed_community {
+        for u in &comm.url_list {
+            let cleaned = clean_domain_entry(u);
+            if !cleaned.is_empty() {
+                raw_video.insert(cleaned);
+            }
+        }
+    }
 
     let mut raw_images: HashSet<String> = HashSet::new();
-    for u in parsed.image_list {
+    for u in parsed_vrc.image_list {
         let cleaned = clean_domain_entry(&u);
         if !cleaned.is_empty() {
             raw_images.insert(cleaned);
         }
     }
+    if let Some(ref comm) = parsed_community {
+        for u in &comm.image_list {
+            let cleaned = clean_domain_entry(u);
+            if !cleaned.is_empty() {
+                raw_images.insert(cleaned);
+            }
+        }
+    }
 
     let mut raw_strings: HashSet<String> = HashSet::new();
-    for u in parsed.string_list {
+    for u in parsed_vrc.string_list {
         let cleaned = clean_domain_entry(&u);
         if !cleaned.is_empty() {
             raw_strings.insert(cleaned);
         }
     }
+    if let Some(ref comm) = parsed_community {
+        for u in &comm.string_list {
+            let cleaned = clean_domain_entry(u);
+            if !cleaned.is_empty() {
+                raw_strings.insert(cleaned);
+            }
+        }
+    }
 
     let mut protected: HashSet<String> = HashSet::new();
-    for u in parsed.asset_urls {
+    for u in parsed_vrc.asset_urls {
         let cleaned = clean_domain_entry(&u);
         if !cleaned.is_empty() {
             protected.insert(cleaned.clone());
@@ -122,10 +428,31 @@ pub fn parse_vrchat_config_json(json_str: &str) -> Result<DomainLists> {
             protected.insert(format!("*.{bare}"));
         }
     }
+    if let Some(ref comm) = parsed_community {
+        for u in &comm.asset_urls {
+            let cleaned = clean_domain_entry(u);
+            if !cleaned.is_empty() {
+                protected.insert(cleaned.clone());
+                let bare = cleaned.trim_start_matches("*.");
+                protected.insert(bare.to_string());
+                protected.insert(format!("*.{bare}"));
+            }
+        }
+    }
 
     // Always guarantee core asset wildcards
-    for base in &["assets.vrchat.com", "vrchat.com", "*.vrchat.com", "vrchat.cloud", "*.vrchat.cloud"] {
+    for base in &[
+        "assets.vrchat.com",
+        "vrchat.com",
+        "*.vrchat.com",
+        "vrchat.cloud",
+        "*.vrchat.cloud",
+        "dbinj8iahsbec.cloudfront.net",
+        "*.dbinj8iahsbec.cloudfront.net",
+    ] {
         protected.insert(base.to_string());
+        let bare = base.trim_start_matches("*.");
+        protected.insert(bare.to_string());
     }
 
     // Detect any domain present in two or more lists and strictly protect it from pure video/image/string blocking
@@ -147,6 +474,7 @@ pub fn parse_vrchat_config_json(json_str: &str) -> Result<DomainLists> {
         // Exclude any vrchat internal domains from blocking
         if bare == "vrchat.com" || bare.ends_with(".vrchat.com")
             || bare == "vrchat.cloud" || bare.ends_with(".vrchat.cloud")
+            || bare == "dbinj8iahsbec.cloudfront.net" || bare.ends_with(".dbinj8iahsbec.cloudfront.net")
         {
             return true;
         }
@@ -208,34 +536,6 @@ fn clean_domain_entry(entry: &str) -> String {
         s = &s[..pos];
     }
     s.trim().to_lowercase()
-}
-
-/// Embedded copy of VRChat remote config (`https://api.vrchat.cloud/api/1/config`)
-/// captured at compile time as a fallback whenever the network is unavailable.
-const EMBEDDED_FALLBACK_CONFIG: &str = include_str!("../assets/vrchat_config_fallback.json");
-
-fn build_domain_lists_fallback() -> DomainLists {
-    parse_vrchat_config_json(EMBEDDED_FALLBACK_CONFIG)
-        .expect("embedded fallback VRChat config JSON must always be valid")
-}
-
-async fn fetch_remote_config() -> Result<DomainLists> {
-    let client = reqwest::Client::builder()
-        .timeout(std::time::Duration::from_secs(5))
-        .user_agent("lvr/0.1.0")
-        .build()?;
-
-    let response = client
-        .get("https://api.vrchat.cloud/api/1/config")
-        .send()
-        .await?;
-
-    if !response.status().is_success() {
-        anyhow::bail!("VRChat config request failed with HTTP status {}", response.status());
-    }
-
-    let body = response.text().await?;
-    parse_vrchat_config_json(&body)
 }
 
 impl BlockCategory {
@@ -443,6 +743,13 @@ fn update_hosts_file(prefix: &Path, state: BlockState) -> Result<()> {
 
             for domain in cat.domains() {
                 let bare = domain.trim_start_matches("*.");
+                if bare.is_empty() || bare == "localhost" {
+                    continue;
+                }
+                // Skip raw IP addresses in hosts file domain entries
+                if bare.parse::<std::net::IpAddr>().is_ok() {
+                    continue;
+                }
                 result.push_str(&format!("0.0.0.0 {bare}\n"));
                 if !domain.starts_with("*.") && !domain.starts_with("www.") {
                     result.push_str(&format!("0.0.0.0 www.{bare}\n"));
@@ -597,4 +904,83 @@ mod tests {
             assert!(!lists.rest_domains.contains(&asset.to_string()), "asset {asset} in rest");
         }
     }
+
+    #[test]
+    fn parse_vrchat_and_community_config_json_merges_smartly() {
+        let vrc_json = r#"{
+            "urlList": ["*.youtube.com", "twitch.tv"],
+            "imageHostUrlList": ["i.imgur.com"],
+            "stringHostUrlList": ["pastebin.com"],
+            "whiteListedAssetUrls": ["https://assets.vrchat.com/adminfiles/"]
+        }"#;
+
+        let community_json = r#"{
+            "urlList": ["custom-video.com", "shared-multipurpose.com", "assets.vrchat.com"],
+            "imageHostUrlList": ["custom-image.com", "shared-multipurpose.com"],
+            "stringHostUrlList": ["custom-string.com"]
+        }"#;
+
+        let lists = parse_vrchat_and_community_config_json(vrc_json, Some(community_json))
+            .expect("merging configs should succeed");
+
+        // 1. Community video and image domains are merged
+        assert!(lists.video_domains.contains(&"custom-video.com".to_string()));
+        assert!(lists.image_domains.contains(&"custom-image.com".to_string()));
+        assert!(lists.string_domains.contains(&"custom-string.com".to_string()));
+
+        // 2. Multi-list domain shared-multipurpose.com goes to rest, not pure video or image
+        assert!(!lists.video_domains.contains(&"shared-multipurpose.com".to_string()));
+        assert!(!lists.image_domains.contains(&"shared-multipurpose.com".to_string()));
+        assert!(lists.rest_domains.contains(&"shared-multipurpose.com".to_string()));
+
+        // 3. assets.vrchat.com is protected and not in ANY category
+        assert!(!lists.video_domains.contains(&"assets.vrchat.com".to_string()));
+        assert!(!lists.rest_domains.contains(&"assets.vrchat.com".to_string()));
+
+        // 4. Fallback with community blocklists has zero category overlap
+        let fallback_comm = build_domain_lists_fallback_with_community(true);
+        let v_set: HashSet<_> = fallback_comm.video_domains.iter().cloned().collect();
+        let i_set: HashSet<_> = fallback_comm.image_domains.iter().cloned().collect();
+        let s_set: HashSet<_> = fallback_comm.string_domains.iter().cloned().collect();
+        let r_set: HashSet<_> = fallback_comm.rest_domains.iter().cloned().collect();
+        assert!(v_set.is_disjoint(&i_set));
+        assert!(v_set.is_disjoint(&s_set));
+        assert!(v_set.is_disjoint(&r_set));
+        assert!(i_set.is_disjoint(&s_set));
+        assert!(i_set.is_disjoint(&r_set));
+        assert!(s_set.is_disjoint(&r_set));
+    }
+
+    #[tokio::test]
+    async fn community_config_url_and_dynamic_loading() {
+        assert_eq!(
+            COMMUNITY_CONFIG_URL,
+            "https://github.com/Bluscream/lvr/raw/refs/heads/main/assets/lists/config.json"
+        );
+
+        // When community blocklists are disabled, only VRChat default fallback lists are present
+        let no_comm = build_domain_lists_fallback_with_community(false);
+        assert!(!no_comm.video_domains.contains(&"andre-stinkt.de".to_string()));
+
+        // When reloading with false, ACTIVE_DOMAIN_LISTS is updated without community lists
+        let reloaded_no_comm = reload_domain_lists(false).await;
+        assert!(!reloaded_no_comm.video_domains.contains(&"andre-stinkt.de".to_string()));
+    }
+
+    #[test]
+    fn community_config_cache_freshness_check() {
+        let temp_dir = std::env::temp_dir();
+        let fresh_file = temp_dir.join("lvr_test_fresh_config.json");
+        let _ = fs::write(&fresh_file, r#"{"urlList": ["fresh.com"]}"#);
+
+        assert!(is_file_fresh(&fresh_file, COMMUNITY_CACHE_MAX_AGE));
+        assert!(!is_file_fresh(&fresh_file, std::time::Duration::from_nanos(1)));
+
+        let missing_file = temp_dir.join("lvr_test_missing_config.json");
+        let _ = fs::remove_file(&missing_file);
+        assert!(!is_file_fresh(&missing_file, COMMUNITY_CACHE_MAX_AGE));
+
+        let _ = fs::remove_file(&fresh_file);
+    }
 }
+

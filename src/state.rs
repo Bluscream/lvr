@@ -40,6 +40,8 @@ pub enum Command {
     /// Set media/domain blocking state for a specific category.
     #[allow(dead_code)]
     SetBlockCategory(crate::domain_block::BlockCategory, bool),
+    /// Reload or update active domain lists (e.g. after community blocklists toggle).
+    ReloadDomainLists,
     Quit,
 }
 

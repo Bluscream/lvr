@@ -399,12 +399,28 @@ impl Default for VirtualDisplayConfig {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
+pub struct DomainBlockConfig {
+    /// Merge community-sourced blocklists into active domain lists.
+    pub load_community_blocklists: bool,
+}
+
+impl Default for DomainBlockConfig {
+    fn default() -> Self {
+        Self {
+            load_community_blocklists: true,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
 pub struct Config {
     pub general: General,
     pub wivrn: WivrnConfig,
     pub audio: AudioConfig,
     pub steam: SteamConfig,
     pub virtual_display: VirtualDisplayConfig,
+    pub domain_block: DomainBlockConfig,
     #[serde(rename = "autostart")]
     pub autostart: Vec<AutostartEntry>,
 }
@@ -417,6 +433,7 @@ impl Default for Config {
             audio: AudioConfig::default(),
             steam: SteamConfig::default(),
             virtual_display: VirtualDisplayConfig::default(),
+            domain_block: DomainBlockConfig::default(),
             autostart: default_entries(),
         }
     }
