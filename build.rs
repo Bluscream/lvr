@@ -9,6 +9,7 @@ fn main() {
 
     register_rerun_triggers();
     check_no_legacy_code();
+    check_file_lengths();
     fetch_vrchat_config(&out_dir);
     compile_dns_shield(&out_dir);
 }
@@ -79,6 +80,38 @@ fn compile_dns_shield(out_dir: &str) {
 
     // Also copy to c_src/ for repository-local tests
     let _ = fs::copy(&shim_out, "c_src/liblvr_dns_shield.so");
+}
+
+/// Fails the build if any `.rs` file in `src/` exceeds 1000 lines.
+fn check_file_lengths() {
+    const MAX_LINES: usize = 1000;
+    let src_dir = Path::new("src");
+    let mut violations: Vec<String> = Vec::new();
+
+    visit_rs_files(src_dir, &mut |path, content| {
+        let count = content.lines().count();
+        if count > MAX_LINES {
+            violations.push(format!(
+                "{}: {} lines (max {MAX_LINES})",
+                path.display(),
+                count,
+            ));
+        }
+    });
+
+    if !violations.is_empty() {
+        eprintln!();
+        eprintln!("=== Source files exceed {MAX_LINES}-line limit ===");
+        eprintln!();
+        for v in &violations {
+            eprintln!("  {v}");
+        }
+        eprintln!();
+        panic!(
+            "{} file(s) exceed the {MAX_LINES}-line limit. See output above.",
+            violations.len()
+        );
+    }
 }
 
 /// Scans all `.rs` files under `src/` and fails the build if any line
