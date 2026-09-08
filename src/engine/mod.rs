@@ -135,6 +135,7 @@ impl Engine {
         self.shared.info("Supervisor stopped");
     }
 
+    #[allow(clippy::too_many_lines)]
     async fn handle_command(&mut self, cmd: Command) {
         match cmd {
             Command::Quit => {}
@@ -207,6 +208,21 @@ impl Engine {
                 // Immediately run a tick to refresh status
                 self.tick().await;
             }
+            Command::SetSteamShieldEnabled(enable) => {
+                match crate::domain_block::dns_shield::set_steam_shield_enabled(enable).await {
+                    Ok(()) => {
+                        if enable {
+                            self.shared.info("DNS Shield enabled in Steam launch options for VRChat");
+                        } else {
+                            self.shared.info("DNS Shield disabled in Steam launch options for VRChat");
+                        }
+                    }
+                    Err(err) => {
+                        self.shared.error(format!("Failed modifying Steam launch options: {err:#}"));
+                    }
+                }
+                self.tick().await;
+            }
             Command::CreateVirtualDisplay => {
                 self.pending_virtual_display_action = None;
                 let res = self.shared.config().virtual_display.resolution.clone();
@@ -253,6 +269,9 @@ impl Engine {
 
         self.update_virtual_display(&config);
 
+        let steam_launch_options = crate::domain_block::dns_shield::read_steam_launch_options().unwrap_or_default();
+        let steam_shield_active = crate::domain_block::dns_shield::is_shield_in_launch_options(&steam_launch_options);
+
         let status = Status {
             wivrn_running: wivrn.running,
             headset_connected: wivrn.headset_connected,
@@ -270,6 +289,8 @@ impl Engine {
             sources: self.cached_sources.clone(),
             virtual_display_created: self.virtual_display_created,
             virtual_display_info: self.virtual_display_info.clone(),
+            steam_shield_active,
+            steam_launch_options,
         };
         self.shared.set_status(status);
     }
@@ -479,6 +500,9 @@ pub async fn probe(config: &Config) -> Status {
     let audio_on_vr =
         !config.audio.vr_sink.trim().is_empty() && default_sink == config.audio.vr_sink.trim();
 
+    let steam_launch_options = crate::domain_block::dns_shield::read_steam_launch_options().unwrap_or_default();
+    let steam_shield_active = crate::domain_block::dns_shield::is_shield_in_launch_options(&steam_launch_options);
+
     Status {
         wivrn_running: wivrn.running,
         headset_connected: wivrn.headset_connected,
@@ -498,5 +522,7 @@ pub async fn probe(config: &Config) -> Status {
         sources: audio::list_devices(Kind::Source).await.unwrap_or_default(),
         virtual_display_created: false,
         virtual_display_info: None,
+        steam_shield_active,
+        steam_launch_options,
     }
 }

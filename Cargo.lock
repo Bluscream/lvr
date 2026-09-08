@@ -2064,6 +2064,7 @@ name = "lvr"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "cc",
  "chrono",
  "directories",
  "eframe",

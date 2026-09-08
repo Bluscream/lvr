@@ -38,6 +38,8 @@ pub enum Command {
     ReloadDomainLists,
     /// Refresh all state (polls, domain lists, prefix hosts file blocks, WiVRn).
     ReloadAll,
+    /// Enable or disable the DNS Shield in Steam launch options for VRChat.
+    SetSteamShieldEnabled(bool),
     Quit,
 }
 
@@ -61,6 +63,9 @@ pub struct Status {
     pub sources: Vec<AudioDevice>,
     pub virtual_display_created: bool,
     pub virtual_display_info: Option<String>,
+    /// Whether the DNS Shield LD_PRELOAD is currently configured in Steam launch options.
+    pub steam_shield_active: bool,
+    pub steam_launch_options: String,
 }
 
 impl Status {

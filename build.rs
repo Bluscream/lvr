@@ -13,6 +13,7 @@ fn main() {
 
     println!("cargo:rerun-if-changed=build.rs");
     println!("cargo:rerun-if-changed=assets/vrchat_config_fallback.json");
+    println!("cargo:rerun-if-changed=c_src/dns_shield.c");
 
     let mut captured = false;
     let output = Command::new("curl")
@@ -41,5 +42,31 @@ fn main() {
             .expect("bundled fallback config must exist in assets/");
         fs::write(&target_path, fallback_content)
             .expect("writing fallback config to OUT_DIR");
+    }
+
+    // Compile c_src/dns_shield.c into liblvr_dns_shield.so shared library
+    let shim_src = Path::new("c_src/dns_shield.c");
+    let shim_out = Path::new(&out_dir).join("liblvr_dns_shield.so");
+
+    let gcc_status = Command::new("gcc")
+        .args([
+            "-shared",
+            "-fPIC",
+            "-O3",
+            "-Wall",
+            "-Wextra",
+            shim_src.to_str().unwrap(),
+            "-o",
+            shim_out.to_str().unwrap(),
+            "-ldl",
+            "-lpthread",
+        ])
+        .status();
+
+    if let Ok(st) = gcc_status && st.success() {
+        // Also copy to c_src/liblvr_dns_shield.so for repository-local tests
+        let _ = fs::copy(&shim_out, "c_src/liblvr_dns_shield.so");
+    } else {
+        panic!("Failed to compile liblvr_dns_shield.so with gcc");
     }
 }

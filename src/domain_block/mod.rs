@@ -18,6 +18,7 @@ use std::sync::{Arc, RwLock};
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 
+pub mod dns_shield;
 pub mod vrchat_config;
 
 /// URL to download the pre-compiled, unified domains JSON from GitHub.
@@ -415,10 +416,11 @@ pub fn set_category_blocked(prefix: &Path, category: &BlockCategory, block: bool
     Ok(())
 }
 
-/// Apply full block state (hosts + yt-dlp) cleanly in one atomic operation.
+/// Apply full block state (hosts + yt-dlp + dns_shield rules) cleanly in one atomic operation.
 pub fn sync_all(prefix: &Path, state: &BlockState) -> Result<()> {
     update_hosts_file(prefix, state)?;
     update_ytdlp_file(prefix, state.video_blocked)?;
+    let _ = dns_shield::sync_shield_rules(state);
     Ok(())
 }
 
