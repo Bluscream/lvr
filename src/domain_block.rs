@@ -754,56 +754,84 @@ pub fn map_key_to_category(key: &str) -> Option<BlockCategory> {
     }
 }
 
-/// Parse VRChat config and multiple community blocklists, smartly enforcing safety invariants
-/// and tracking blocked domain counts per list and total.
-pub fn parse_all_domain_lists(
-    vrc_json_str: &str,
-    community_lists: &[RawBlocklistInput],
-) -> Result<DomainLists> {
-    let parsed_vrc: serde_json::Value = serde_json::from_str(vrc_json_str)?;
-    let mut protected: HashSet<String> = HashSet::new();
+struct CommData {
+    name: String,
+    enabled: bool,
+    domains_by_cat: BTreeMap<BlockCategory, HashSet<String>>,
+}
 
+struct ClassifiedDomains {
+    video_domains: Vec<String>,
+    image_domains: Vec<String>,
+    string_domains: Vec<String>,
+    custom_domains: BTreeMap<String, Vec<String>>,
+    rest_domains: Vec<String>,
+    custom_categories: Vec<String>,
+}
+
+fn extract_protected_asset_urls(
+    obj: &serde_json::Map<String, serde_json::Value>,
+    protected: &mut HashSet<String>,
+) {
+    if let Some(asset_urls) = obj.get("whiteListedAssetUrls").and_then(|v| v.as_array()) {
+        for item in asset_urls {
+            if let Some(s) = item.as_str() {
+                let cleaned = clean_domain_entry(s);
+                if !cleaned.is_empty() {
+                    protected.insert(cleaned.clone());
+                    let bare = cleaned.trim_start_matches("*.");
+                    protected.insert(bare.to_string());
+                    protected.insert(format!("*.{bare}"));
+                }
+            }
+        }
+    }
+}
+
+fn parse_official_vrc_blocklist(
+    vrc_json_str: &str,
+    protected: &mut HashSet<String>,
+    raw_domains_by_cat: &mut BTreeMap<BlockCategory, HashSet<String>>,
+) -> Result<BTreeMap<BlockCategory, HashSet<String>>> {
+    let parsed_vrc: serde_json::Value = serde_json::from_str(vrc_json_str)?;
     let mut official_domains_by_cat: BTreeMap<BlockCategory, HashSet<String>> = BTreeMap::new();
-    let mut raw_domains_by_cat: BTreeMap<BlockCategory, HashSet<String>> = BTreeMap::new();
 
     if let Some(vrc_obj) = parsed_vrc.as_object() {
-        if let Some(asset_urls) = vrc_obj.get("whiteListedAssetUrls").and_then(|v| v.as_array()) {
-            for item in asset_urls {
-                if let Some(s) = item.as_str() {
-                    let cleaned = clean_domain_entry(s);
-                    if !cleaned.is_empty() {
-                        protected.insert(cleaned.clone());
-                        let bare = cleaned.trim_start_matches("*.");
-                        protected.insert(bare.to_string());
-                        protected.insert(format!("*.{bare}"));
+        extract_protected_asset_urls(vrc_obj, protected);
+
+        for (key, val) in vrc_obj {
+            if let Some(cat) = map_key_to_category(key)
+                && let Some(arr) = val.as_array()
+            {
+                for item in arr {
+                    if let Some(s) = item.as_str()
+                        && is_valid_domain_or_glob(s)
+                    {
+                        let cleaned = clean_domain_entry(s);
+                        if !cleaned.is_empty() {
+                            official_domains_by_cat
+                                .entry(cat.clone())
+                                .or_default()
+                                .insert(cleaned.clone());
+                            raw_domains_by_cat
+                                .entry(cat.clone())
+                                .or_default()
+                                .insert(cleaned);
+                        }
                     }
                 }
             }
         }
-
-        for (key, val) in vrc_obj {
-            if let Some(cat) = map_key_to_category(key)
-                && let Some(arr) = val.as_array() {
-                    for item in arr {
-                        if let Some(s) = item.as_str()
-                            && is_valid_domain_or_glob(s) {
-                                let cleaned = clean_domain_entry(s);
-                                if !cleaned.is_empty() {
-                                    official_domains_by_cat.entry(cat.clone()).or_default().insert(cleaned.clone());
-                                    raw_domains_by_cat.entry(cat.clone()).or_default().insert(cleaned);
-                                }
-                            }
-                    }
-                }
-        }
     }
 
-    struct CommData {
-        name: String,
-        enabled: bool,
-        domains_by_cat: BTreeMap<BlockCategory, HashSet<String>>,
-    }
+    Ok(official_domains_by_cat)
+}
 
+fn parse_community_blocklists(
+    community_lists: &[RawBlocklistInput],
+    protected: &mut HashSet<String>,
+    raw_domains_by_cat: &mut BTreeMap<BlockCategory, HashSet<String>>,
+) -> Vec<CommData> {
     let mut comm_data: Vec<CommData> = Vec::new();
 
     for item in community_lists {
@@ -816,38 +844,35 @@ pub fn parse_all_domain_lists(
             continue;
         }
 
-        let parsed: serde_json::Value = serde_json::from_str(&item.json).unwrap_or(serde_json::Value::Null);
+        let parsed: serde_json::Value =
+            serde_json::from_str(&item.json).unwrap_or(serde_json::Value::Null);
         let mut list_by_cat: BTreeMap<BlockCategory, HashSet<String>> = BTreeMap::new();
 
         if let Some(obj) = parsed.as_object() {
-            if let Some(asset_urls) = obj.get("whiteListedAssetUrls").and_then(|v| v.as_array()) {
-                for entry in asset_urls {
-                    if let Some(s) = entry.as_str() {
-                        let cleaned = clean_domain_entry(s);
-                        if !cleaned.is_empty() {
-                            protected.insert(cleaned.clone());
-                            let bare = cleaned.trim_start_matches("*.");
-                            protected.insert(bare.to_string());
-                            protected.insert(format!("*.{bare}"));
-                        }
-                    }
-                }
-            }
+            extract_protected_asset_urls(obj, protected);
 
             for (key, val) in obj {
                 if let Some(cat) = map_key_to_category(key)
-                    && let Some(arr) = val.as_array() {
-                        for entry in arr {
-                            if let Some(s) = entry.as_str()
-                                && is_valid_domain_or_glob(s) {
-                                    let cleaned = clean_domain_entry(s);
-                                    if !cleaned.is_empty() {
-                                        list_by_cat.entry(cat.clone()).or_default().insert(cleaned.clone());
-                                        raw_domains_by_cat.entry(cat.clone()).or_default().insert(cleaned);
-                                    }
-                                }
+                    && let Some(arr) = val.as_array()
+                {
+                    for entry in arr {
+                        if let Some(s) = entry.as_str()
+                            && is_valid_domain_or_glob(s)
+                        {
+                            let cleaned = clean_domain_entry(s);
+                            if !cleaned.is_empty() {
+                                list_by_cat
+                                    .entry(cat.clone())
+                                    .or_default()
+                                    .insert(cleaned.clone());
+                                raw_domains_by_cat
+                                    .entry(cat.clone())
+                                    .or_default()
+                                    .insert(cleaned);
+                            }
                         }
                     }
+                }
             }
         }
 
@@ -858,7 +883,10 @@ pub fn parse_all_domain_lists(
         });
     }
 
-    // Always guarantee core asset wildcards
+    comm_data
+}
+
+fn ensure_core_asset_wildcards(protected: &mut HashSet<String>) {
     for base in &[
         "assets.vrchat.com",
         "vrchat.com",
@@ -872,8 +900,12 @@ pub fn parse_all_domain_lists(
         let bare = base.trim_start_matches("*.");
         protected.insert(bare.to_string());
     }
+}
 
-    // Detect any domain present in two or more DIFFERENT categories and strictly protect it from pure blocking
+fn classify_domains(
+    raw_domains_by_cat: &BTreeMap<BlockCategory, HashSet<String>>,
+    protected: &HashSet<String>,
+) -> ClassifiedDomains {
     let mut in_multiple = HashSet::new();
     let mut all_unique_domains: HashSet<String> = HashSet::new();
     for set in raw_domains_by_cat.values() {
@@ -929,7 +961,7 @@ pub fn parse_all_domain_lists(
     let mut custom_domains: BTreeMap<String, Vec<String>> = BTreeMap::new();
     let mut custom_categories_set: HashSet<String> = HashSet::new();
 
-    for (cat, domains) in &raw_domains_by_cat {
+    for (cat, domains) in raw_domains_by_cat {
         if let BlockCategory::Custom(name) = cat {
             let pure: Vec<String> = domains
                 .iter()
@@ -957,46 +989,73 @@ pub fn parse_all_domain_lists(
     let mut custom_categories: Vec<String> = custom_categories_set.into_iter().collect();
     custom_categories.sort();
 
-    #[cfg(test)]
-    let mut protected_list: Vec<String> = protected.into_iter().collect();
-    #[cfg(test)]
-    protected_list.sort();
+    ClassifiedDomains {
+        video_domains,
+        image_domains,
+        string_domains,
+        custom_domains,
+        rest_domains,
+        custom_categories,
+    }
+}
 
-    // Calculate per-list stats
-    let v_set: HashSet<&str> = video_domains.iter().map(|s| s.as_str()).collect();
-    let i_set: HashSet<&str> = image_domains.iter().map(|s| s.as_str()).collect();
-    let s_set: HashSet<&str> = string_domains.iter().map(|s| s.as_str()).collect();
-    let r_set: HashSet<&str> = rest_domains.iter().map(|s| s.as_str()).collect();
+fn count_map_categories(
+    domains_by_cat: &BTreeMap<BlockCategory, HashSet<String>>,
+    v_set: &HashSet<&str>,
+    i_set: &HashSet<&str>,
+    s_set: &HashSet<&str>,
+    r_set: &HashSet<&str>,
+    custom_sets: &BTreeMap<String, HashSet<&str>>,
+) -> CategoryCounts {
+    let mut counts = CategoryCounts::default();
+    if let Some(set) = domains_by_cat.get(&BlockCategory::Video) {
+        counts.video = set.iter().filter(|d| v_set.contains(d.as_str())).count();
+    }
+    if let Some(set) = domains_by_cat.get(&BlockCategory::Images) {
+        counts.image = set.iter().filter(|d| i_set.contains(d.as_str())).count();
+    }
+    if let Some(set) = domains_by_cat.get(&BlockCategory::Strings) {
+        counts.string = set.iter().filter(|d| s_set.contains(d.as_str())).count();
+    }
+    for (name, c_set) in custom_sets {
+        if let Some(set) = domains_by_cat.get(&BlockCategory::Custom(name.clone())) {
+            let count = set.iter().filter(|d| c_set.contains(d.as_str())).count();
+            counts.set_for_category(&BlockCategory::Custom(name.clone()), count);
+        }
+    }
+    let mut all_domains = HashSet::new();
+    for set in domains_by_cat.values() {
+        all_domains.extend(set.iter());
+    }
+    counts.rest = all_domains.iter().filter(|d| r_set.contains(d.as_str())).count();
+    counts
+}
+
+fn compute_list_stats(
+    official_domains_by_cat: &BTreeMap<BlockCategory, HashSet<String>>,
+    comm_data: Vec<CommData>,
+    classified: &ClassifiedDomains,
+) -> (Vec<BlocklistStats>, CategoryCounts) {
+    let v_set: HashSet<&str> = classified.video_domains.iter().map(|s| s.as_str()).collect();
+    let i_set: HashSet<&str> = classified.image_domains.iter().map(|s| s.as_str()).collect();
+    let s_set: HashSet<&str> = classified.string_domains.iter().map(|s| s.as_str()).collect();
+    let r_set: HashSet<&str> = classified.rest_domains.iter().map(|s| s.as_str()).collect();
     let mut custom_sets: BTreeMap<String, HashSet<&str>> = BTreeMap::new();
-    for (name, list) in &custom_domains {
+    for (name, list) in &classified.custom_domains {
         custom_sets.insert(name.clone(), list.iter().map(|s| s.as_str()).collect());
     }
 
     let mut list_stats = Vec::new();
 
     // 1. Official stats
-    let mut off_counts = CategoryCounts::default();
-    if let Some(set) = official_domains_by_cat.get(&BlockCategory::Video) {
-        off_counts.video = set.iter().filter(|d| v_set.contains(d.as_str())).count();
-    }
-    if let Some(set) = official_domains_by_cat.get(&BlockCategory::Images) {
-        off_counts.image = set.iter().filter(|d| i_set.contains(d.as_str())).count();
-    }
-    if let Some(set) = official_domains_by_cat.get(&BlockCategory::Strings) {
-        off_counts.string = set.iter().filter(|d| s_set.contains(d.as_str())).count();
-    }
-    for (name, c_set) in &custom_sets {
-        if let Some(set) = official_domains_by_cat.get(&BlockCategory::Custom(name.clone())) {
-            let count = set.iter().filter(|d| c_set.contains(d.as_str())).count();
-            off_counts.set_for_category(&BlockCategory::Custom(name.clone()), count);
-        }
-    }
-    let mut off_all_domains = HashSet::new();
-    for set in official_domains_by_cat.values() {
-        off_all_domains.extend(set.iter());
-    }
-    off_counts.rest = off_all_domains.iter().filter(|d| r_set.contains(d.as_str())).count();
-
+    let off_counts = count_map_categories(
+        official_domains_by_cat,
+        &v_set,
+        &i_set,
+        &s_set,
+        &r_set,
+        &custom_sets,
+    );
     list_stats.push(BlocklistStats {
         name: "Official".to_string(),
         counts: off_counts,
@@ -1006,28 +1065,14 @@ pub fn parse_all_domain_lists(
     // 2. Community stats per list
     for comm in comm_data {
         if comm.enabled {
-            let mut counts = CategoryCounts::default();
-            if let Some(set) = comm.domains_by_cat.get(&BlockCategory::Video) {
-                counts.video = set.iter().filter(|d| v_set.contains(d.as_str())).count();
-            }
-            if let Some(set) = comm.domains_by_cat.get(&BlockCategory::Images) {
-                counts.image = set.iter().filter(|d| i_set.contains(d.as_str())).count();
-            }
-            if let Some(set) = comm.domains_by_cat.get(&BlockCategory::Strings) {
-                counts.string = set.iter().filter(|d| s_set.contains(d.as_str())).count();
-            }
-            for (name, c_set) in &custom_sets {
-                if let Some(set) = comm.domains_by_cat.get(&BlockCategory::Custom(name.clone())) {
-                    let count = set.iter().filter(|d| c_set.contains(d.as_str())).count();
-                    counts.set_for_category(&BlockCategory::Custom(name.clone()), count);
-                }
-            }
-            let mut comm_all = HashSet::new();
-            for set in comm.domains_by_cat.values() {
-                comm_all.extend(set.iter());
-            }
-            counts.rest = comm_all.iter().filter(|d| r_set.contains(d.as_str())).count();
-
+            let counts = count_map_categories(
+                &comm.domains_by_cat,
+                &v_set,
+                &i_set,
+                &s_set,
+                &r_set,
+                &custom_sets,
+            );
             list_stats.push(BlocklistStats {
                 name: comm.name,
                 counts,
@@ -1043,27 +1088,56 @@ pub fn parse_all_domain_lists(
     }
 
     let mut total_counts = CategoryCounts {
-        video: video_domains.len(),
-        image: image_domains.len(),
-        string: string_domains.len(),
+        video: classified.video_domains.len(),
+        image: classified.image_domains.len(),
+        string: classified.string_domains.len(),
         custom: BTreeMap::new(),
-        rest: rest_domains.len(),
+        rest: classified.rest_domains.len(),
     };
-    for (name, domains) in &custom_domains {
+    for (name, domains) in &classified.custom_domains {
         total_counts.set_for_category(&BlockCategory::Custom(name.clone()), domains.len());
     }
 
+    (list_stats, total_counts)
+}
+
+/// Parse VRChat config and multiple community blocklists, smartly enforcing safety invariants
+/// and tracking blocked domain counts per list and total.
+pub fn parse_all_domain_lists(
+    vrc_json_str: &str,
+    community_lists: &[RawBlocklistInput],
+) -> Result<DomainLists> {
+    let mut protected: HashSet<String> = HashSet::new();
+    let mut raw_domains_by_cat: BTreeMap<BlockCategory, HashSet<String>> = BTreeMap::new();
+
+    let official_domains_by_cat =
+        parse_official_vrc_blocklist(vrc_json_str, &mut protected, &mut raw_domains_by_cat)?;
+    let comm_data =
+        parse_community_blocklists(community_lists, &mut protected, &mut raw_domains_by_cat);
+
+    ensure_core_asset_wildcards(&mut protected);
+
+    let classified = classify_domains(&raw_domains_by_cat, &protected);
+
+    #[cfg(test)]
+    let mut protected_list: Vec<String> = protected.into_iter().collect();
+    #[cfg(test)]
+    protected_list.sort();
+
+    let (list_stats, total_counts) =
+        compute_list_stats(&official_domains_by_cat, comm_data, &classified);
+
     Ok(DomainLists {
-        video_domains,
-        image_domains,
-        string_domains,
-        custom_domains,
-        rest_domains,
+        video_domains: classified.video_domains,
+        image_domains: classified.image_domains,
+        string_domains: classified.string_domains,
+        custom_domains: classified.custom_domains,
+        rest_domains: classified.rest_domains,
         #[cfg(test)]
         protected_domains: protected_list,
         list_stats,
         total_counts,
-        custom_categories,
+        custom_categories: classified.custom_categories,
     })
 }
 

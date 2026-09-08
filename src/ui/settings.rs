@@ -30,130 +30,137 @@ fn general(app: &mut LvrApp, ui: &mut Ui) {
         .spacing([14.0, 12.0])
         .min_col_width(190.0)
         .show(ui, |ui| {
-            ui.label("UI scale");
-            {
-                let mut config = app.shared.config();
-                ui.add(
-                    egui::Slider::new(&mut config.general.ui_scale, 0.8..=2.5)
-                        .step_by(0.05)
-                        .text("bigger = easier to hit in VR"),
-                );
-            }
-            ui.end_row();
-
-            ui.label("Start hidden");
-            {
-                let mut config = app.shared.config();
-                widgets::toggle(
-                    ui,
-                    &mut config.general.start_hidden,
-                    "start in the tray without opening the window",
-                );
-            }
-            ui.end_row();
-
-            ui.label("Close button");
-            {
-                let mut config = app.shared.config();
-                widgets::toggle(
-                    ui,
-                    &mut config.general.close_to_tray,
-                    "hides to tray instead of quitting",
-                );
-            }
-            ui.end_row();
-
-            ui.label("Confirm stop-all");
-            {
-                let mut config = app.shared.config();
-                widgets::toggle(
-                    ui,
-                    &mut config.general.confirm_stop_all,
-                    "ask before “Stop everything VR”",
-                );
-            }
-            ui.end_row();
-
-            ui.label("Show debug info");
-            {
-                let mut config = app.shared.config();
-                widgets::toggle(
-                    ui,
-                    &mut config.general.show_debug_info,
-                    "show PIDs and process details in the status column",
-                );
-            }
-            ui.end_row();
-
-            ui.label("Poll interval");
-            {
-                let mut config = app.shared.config();
-                ui.add(
-                    egui::DragValue::new(&mut config.general.poll_interval_ms)
-                        .range(200..=60_000)
-                        .speed(50.0)
-                        .suffix(" ms"),
-                );
-            }
-            ui.end_row();
-
-            ui.label("Relaunch debounce");
-            {
-                let mut config = app.shared.config();
-                ui.add(
-                    egui::DragValue::new(&mut config.general.relaunch_debounce_secs)
-                        .range(1..=3600)
-                        .speed(1.0)
-                        .suffix(" s"),
-                );
-            }
-            ui.end_row();
-
-            ui.label("Stop grace (SIGTERM->SIGKILL)");
-            {
-                let mut config = app.shared.config();
-                ui.add(
-                    egui::DragValue::new(&mut config.general.stop_grace_secs)
-                        .range(1..=300)
-                        .speed(1.0)
-                        .suffix(" s"),
-                );
-            }
-            ui.end_row();
-
-            ui.label("Log history");
-            {
-                let mut config = app.shared.config();
-                ui.add(
-                    egui::DragValue::new(&mut config.general.log_capacity)
-                        .range(50..=100_000)
-                        .speed(10.0)
-                        .suffix(" lines"),
-                );
-            }
-            ui.end_row();
-
-            ui.label("Terminal command");
-            ui.vertical(|ui| {
-                {
-                    let mut config = app.shared.config();
-                    ui.add(
-                        egui::TextEdit::singleline(&mut config.general.terminal)
-                            .desired_width(430.0)
-                            .hint_text("auto-detect"),
-                    );
-                }
-                let detected = procs::detect_terminal().unwrap_or("none found");
-                ui.label(
-                    RichText::new(format!(
-                        "{{cmd}} is replaced by the app. Detected: {detected}"
-                    ))
-                    .size(12.0)
-                    .color(GREY),
-                );
-            });
-            ui.end_row();
+            general_interface_rows(app, ui);
+            general_runtime_rows(app, ui);
         });
+}
+
+fn general_interface_rows(app: &mut LvrApp, ui: &mut Ui) {
+    ui.label("UI scale");
+    {
+        let mut config = app.shared.config();
+        ui.add(
+            egui::Slider::new(&mut config.general.ui_scale, 0.8..=2.5)
+                .step_by(0.05)
+                .text("bigger = easier to hit in VR"),
+        );
+    }
+    ui.end_row();
+
+    ui.label("Start hidden");
+    {
+        let mut config = app.shared.config();
+        widgets::toggle(
+            ui,
+            &mut config.general.start_hidden,
+            "start in the tray without opening the window",
+        );
+    }
+    ui.end_row();
+
+    ui.label("Close button");
+    {
+        let mut config = app.shared.config();
+        widgets::toggle(
+            ui,
+            &mut config.general.close_to_tray,
+            "hides to tray instead of quitting",
+        );
+    }
+    ui.end_row();
+
+    ui.label("Confirm stop-all");
+    {
+        let mut config = app.shared.config();
+        widgets::toggle(
+            ui,
+            &mut config.general.confirm_stop_all,
+            "ask before “Stop everything VR”",
+        );
+    }
+    ui.end_row();
+
+    ui.label("Show debug info");
+    {
+        let mut config = app.shared.config();
+        widgets::toggle(
+            ui,
+            &mut config.general.show_debug_info,
+            "show PIDs and process details in the status column",
+        );
+    }
+    ui.end_row();
+}
+
+fn general_runtime_rows(app: &mut LvrApp, ui: &mut Ui) {
+    ui.label("Poll interval");
+    {
+        let mut config = app.shared.config();
+        ui.add(
+            egui::DragValue::new(&mut config.general.poll_interval_ms)
+                .range(200..=60_000)
+                .speed(50.0)
+                .suffix(" ms"),
+        );
+    }
+    ui.end_row();
+
+    ui.label("Relaunch debounce");
+    {
+        let mut config = app.shared.config();
+        ui.add(
+            egui::DragValue::new(&mut config.general.relaunch_debounce_secs)
+                .range(1..=3600)
+                .speed(1.0)
+                .suffix(" s"),
+        );
+    }
+    ui.end_row();
+
+    ui.label("Stop grace (SIGTERM->SIGKILL)");
+    {
+        let mut config = app.shared.config();
+        ui.add(
+            egui::DragValue::new(&mut config.general.stop_grace_secs)
+                .range(1..=300)
+                .speed(1.0)
+                .suffix(" s"),
+        );
+    }
+    ui.end_row();
+
+    ui.label("Log history");
+    {
+        let mut config = app.shared.config();
+        ui.add(
+            egui::DragValue::new(&mut config.general.log_capacity)
+                .range(50..=100_000)
+                .speed(10.0)
+                .suffix(" lines"),
+        );
+    }
+    ui.end_row();
+
+    ui.label("Terminal command");
+    ui.vertical(|ui| {
+        {
+            let mut config = app.shared.config();
+            ui.add(
+                egui::TextEdit::singleline(&mut config.general.terminal)
+                    .desired_width(430.0)
+                    .hint_text("auto-detect"),
+            );
+        }
+        let detected = procs::detect_terminal().unwrap_or("none found");
+        ui.label(
+            RichText::new(format!(
+                "{{cmd}} is replaced by the app. Detected: {detected}"
+            ))
+            .size(12.0)
+            .color(GREY),
+        );
+    });
+    ui.end_row();
 }
 
 fn wivrn(app: &mut LvrApp, ui: &mut Ui) {
@@ -303,11 +310,18 @@ fn vrc_files_and_tools(app: &mut LvrApp, ui: &mut Ui) {
         });
 
     let lists = crate::domain_block::active_domains();
-    let categories = lists.all_categories();
     ui.add_space(6.0);
     ui.label(RichText::new("Domains blocked:").strong());
     ui.add_space(3.0);
+    render_domains_blocked_grid(ui, &lists);
+    ui.add_space(8.0);
 
+    let prefix_opt = crate::domain_block::detect_vrc_prefix("");
+    render_vrc_prefix_section(ui, prefix_opt.as_deref());
+}
+
+fn render_domains_blocked_grid(ui: &mut Ui, lists: &crate::domain_block::DomainLists) {
+    let categories = lists.all_categories();
     let num_columns = 1 + categories.len() + 1;
 
     egui::Grid::new("settings-domains-blocked-grid")
@@ -349,12 +363,11 @@ fn vrc_files_and_tools(app: &mut LvrApp, ui: &mut Ui) {
             ui.label(RichText::new(lists.total_counts.total().to_string()).strong().color(GREEN));
             ui.end_row();
         });
-    ui.add_space(8.0);
+}
 
-    let prefix_opt = crate::domain_block::detect_vrc_prefix("");
-
+fn render_vrc_prefix_section(ui: &mut Ui, prefix_opt: Option<&std::path::Path>) {
     match prefix_opt {
-        Some(ref prefix) => {
+        Some(prefix) => {
             let hosts_file = crate::domain_block::prefix_hosts_path(prefix);
             let tools_dir = crate::domain_block::vrc_tools_dir(prefix);
 
@@ -440,91 +453,82 @@ fn virtual_display(app: &mut LvrApp, ui: &mut Ui) {
             ui.label("Resolution mode");
             {
                 let mut config = app.shared.config();
-                let current_raw = config.virtual_display.resolution.clone();
-                let (mut current_res, mut current_hz) = if let Some((r, h)) = current_raw.split_once('@') {
-                    (r.to_string(), h.to_string())
-                } else {
-                    (current_raw.clone(), "60".to_string())
-                };
-
-                let common_resolutions = [
-                    ("1280x720", "1280x720 (720p HD)"),
-                    ("1920x1080", "1920x1080 (1080p FHD)"),
-                    ("2560x1440", "2560x1440 (1440p QHD)"),
-                    ("3440x1440", "3440x1440 (UWQHD Ultrawide)"),
-                    ("3840x2160", "3840x2160 (4K UHD)"),
-                    ("5120x1440", "5120x1440 (Dual QHD 32:9)"),
-                    ("7680x4320", "7680x4320 (8K UHD)"),
-                    // VR headset-specific single-eye & combined panel targets
-                    ("1832x1920", "1832x1920 (Quest 2 native per-eye)"),
-                    ("2064x2208", "2064x2208 (Quest 3 native per-eye)"),
-                    ("4128x2208", "4128x2208 (Quest 3 combined panel)"),
-                    ("2448x2448", "2448x2448 (Vive Pro 2 native per-eye)"),
-                    ("2880x2720", "2880x2720 (Bigscreen Beyond per-eye)"),
-                    ("3552x3840", "3552x3840 (Apple Vision Pro per-eye)"),
-                    ("3840x3552", "3840x3552 (Somnium VR1 per-eye)"),
-                    ("5120x2160", "5120x2160 (5K2K Ultrawide)"),
-                ];
-
-                let refresh_rates = [
-                    "30",
-                    "45",
-                    "60",
-                    "72",
-                    "75",
-                    "80",
-                    "90",
-                    "100",
-                    "120",
-                    "144",
-                    "165",
-                    "180",
-                    "207",
-                    "240",
-                ];
-
-                let mut changed = false;
-
-                ui.horizontal(|ui| {
-                    let res_label = common_resolutions
-                        .iter()
-                        .find(|(res, _)| *res == current_res)
-                        .map(|(_, desc)| *desc)
-                        .unwrap_or(&current_res);
-
-                    egui::ComboBox::from_id_salt("vd-resolution-select")
-                        .width(260.0)
-                        .selected_text(res_label)
-                        .show_ui(ui, |ui| {
-                            for (res, desc) in common_resolutions {
-                                if ui.selectable_label(current_res == res, desc).clicked() {
-                                    current_res = res.to_string();
-                                    changed = true;
-                                }
-                            }
-                        });
-
-                    let hz_label = format!("{current_hz} Hz");
-                    egui::ComboBox::from_id_salt("vd-refresh-select")
-                        .width(90.0)
-                        .selected_text(hz_label)
-                        .show_ui(ui, |ui| {
-                            for rate in refresh_rates {
-                                let label = format!("{rate} Hz");
-                                if ui.selectable_label(current_hz == rate, label).clicked() {
-                                    current_hz = rate.to_string();
-                                    changed = true;
-                                }
-                            }
-                        });
-                });
-
-                if changed {
-                    config.virtual_display.resolution = format!("{current_res}@{current_hz}");
-                }
+                render_virtual_display_resolution(ui, &mut config);
             }
             ui.end_row();
         });
+}
+
+fn render_virtual_display_resolution(ui: &mut Ui, config: &mut crate::config::Config) {
+    let current_raw = config.virtual_display.resolution.clone();
+    let (mut current_res, mut current_hz) = if let Some((r, h)) = current_raw.split_once('@') {
+        (r.to_string(), h.to_string())
+    } else {
+        (current_raw.clone(), "60".to_string())
+    };
+
+    let common_resolutions = [
+        ("1280x720", "1280x720 (720p HD)"),
+        ("1920x1080", "1920x1080 (1080p FHD)"),
+        ("2560x1440", "2560x1440 (1440p QHD)"),
+        ("3440x1440", "3440x1440 (UWQHD Ultrawide)"),
+        ("3840x2160", "3840x2160 (4K UHD)"),
+        ("5120x1440", "5120x1440 (Dual QHD 32:9)"),
+        ("7680x4320", "7680x4320 (8K UHD)"),
+        // VR headset-specific single-eye & combined panel targets
+        ("1832x1920", "1832x1920 (Quest 2 native per-eye)"),
+        ("2064x2208", "2064x2208 (Quest 3 native per-eye)"),
+        ("4128x2208", "4128x2208 (Quest 3 combined panel)"),
+        ("2448x2448", "2448x2448 (Vive Pro 2 native per-eye)"),
+        ("2880x2720", "2880x2720 (Bigscreen Beyond per-eye)"),
+        ("3552x3840", "3552x3840 (Apple Vision Pro per-eye)"),
+        ("3840x3552", "3840x3552 (Somnium VR1 per-eye)"),
+        ("5120x2160", "5120x2160 (5K2K Ultrawide)"),
+    ];
+
+    let refresh_rates = [
+        "30", "45", "60", "72", "75", "80", "90", "100", "120", "144", "165", "180", "207", "240",
+    ];
+
+    let mut changed = false;
+
+    ui.horizontal(|ui| {
+        let res_label = common_resolutions
+            .iter()
+            .find(|(res, _)| *res == current_res)
+            .map(|(_, desc)| *desc)
+            .unwrap_or(&current_res);
+
+        egui::ComboBox::from_id_salt("vd-resolution-select")
+            .width(260.0)
+            .selected_text(res_label)
+            .show_ui(ui, |ui| {
+                for (res, desc) in common_resolutions {
+                    if ui.selectable_label(current_res == res, desc).clicked() {
+                        current_res = res.to_string();
+                        changed = true;
+                    }
+                }
+            });
+
+        let hz_label = format!("{current_hz} Hz");
+        egui::ComboBox::from_id_salt("vd-refresh-select")
+            .width(90.0)
+            .selected_text(hz_label)
+            .show_ui(ui, |ui| {
+                for rate in refresh_rates {
+                    let label = format!("{rate} Hz");
+                    if ui.selectable_label(current_hz == rate, label).clicked() {
+                        current_hz = rate.to_string();
+                        changed = true;
+                    }
+                }
+            });
+    });
+
+    if changed {
+        config.virtual_display.resolution = format!("{current_res}@{current_hz}");
+    }
 }
 
 fn about(app: &mut LvrApp, ui: &mut Ui) {

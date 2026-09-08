@@ -15,7 +15,7 @@ mod ui;
 mod domain_block;
 mod wivrn;
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use anyhow::{Context, Result};
@@ -126,39 +126,7 @@ fn main() -> Result<()> {
         .with_context(|| format!("loading {}", config_path.display()))?;
     config.normalize();
 
-    if args.check {
-        print_check(&config, &config_path);
-        return Ok(());
-    }
-
-    if args.status {
-        let runtime = tokio::runtime::Builder::new_current_thread()
-            .enable_all()
-            .build()
-            .context("starting the tokio runtime")?;
-        let status = runtime.block_on(engine::probe(&config));
-        print_status(&status, config.general.show_debug_info);
-        return Ok(());
-    }
-
-    if let Some(where_to) = args.audio.as_deref() {
-        let to_vr = match where_to.trim().to_ascii_lowercase().as_str() {
-            "vr" | "headset" => true,
-            "desktop" | "pc" => false,
-            other => anyhow::bail!("--audio expects `vr` or `desktop`, got `{other}`"),
-        };
-        let runtime = tokio::runtime::Builder::new_current_thread()
-            .enable_all()
-            .build()
-            .context("starting the tokio runtime")?;
-        let outcome = runtime.block_on(engine::route_audio(&config, to_vr));
-        for error in &outcome.errors {
-            eprintln!("lvr: {error}");
-        }
-        if outcome.is_empty() {
-            anyhow::bail!("nothing to switch — check the audio devices in your config");
-        }
-        println!("{}", outcome.summary());
+    if handle_cli_command(&args, &config, &config_path)? {
         return Ok(());
     }
 
@@ -193,18 +161,7 @@ fn main() -> Result<()> {
     }
 
     let worker = spawn_worker(shared.clone(), rx, !args.no_tray)?;
-
-    let native_options = eframe::NativeOptions {
-        viewport: egui::ViewportBuilder::default()
-            .with_title("LinuxVR")
-            .with_app_id("lvr")
-            .with_inner_size([1120.0, 760.0])
-            .with_min_inner_size([400.0, 320.0])
-            .with_icon(icon::window_icon())
-            .with_visible(!start_hidden),
-        persist_window: false,
-        ..Default::default()
-    };
+    let native_options = gui_native_options(start_hidden);
 
     let gui_shared = shared.clone();
     let result = eframe::run_native(
@@ -229,6 +186,60 @@ fn main() -> Result<()> {
     tracing::info!("bye");
     // The tray's D-Bus task can still be parked; exit decisively.
     std::process::exit(0);
+}
+
+fn handle_cli_command(args: &Args, config: &Config, config_path: &Path) -> Result<bool> {
+    if args.check {
+        print_check(config, config_path);
+        return Ok(true);
+    }
+
+    if args.status {
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .context("starting the tokio runtime")?;
+        let status = runtime.block_on(engine::probe(config));
+        print_status(&status, config.general.show_debug_info);
+        return Ok(true);
+    }
+
+    if let Some(where_to) = args.audio.as_deref() {
+        let to_vr = match where_to.trim().to_ascii_lowercase().as_str() {
+            "vr" | "headset" => true,
+            "desktop" | "pc" => false,
+            other => anyhow::bail!("--audio expects `vr` or `desktop`, got `{other}`"),
+        };
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .context("starting the tokio runtime")?;
+        let outcome = runtime.block_on(engine::route_audio(config, to_vr));
+        for error in &outcome.errors {
+            eprintln!("lvr: {error}");
+        }
+        if outcome.is_empty() {
+            anyhow::bail!("nothing to switch — check the audio devices in your config");
+        }
+        println!("{}", outcome.summary());
+        return Ok(true);
+    }
+
+    Ok(false)
+}
+
+fn gui_native_options(start_hidden: bool) -> eframe::NativeOptions {
+    eframe::NativeOptions {
+        viewport: egui::ViewportBuilder::default()
+            .with_title("LinuxVR")
+            .with_app_id("lvr")
+            .with_inner_size([1120.0, 760.0])
+            .with_min_inner_size([400.0, 320.0])
+            .with_icon(icon::window_icon())
+            .with_visible(!start_hidden),
+        persist_window: false,
+        ..Default::default()
+    }
 }
 
 /// Handle for the background runtime thread.

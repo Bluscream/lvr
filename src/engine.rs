@@ -383,6 +383,30 @@ impl Engine {
         self.refresh_audio_cache(&config).await;
         self.refresh_media_block_cache();
 
+        self.update_virtual_display(&config);
+
+        let status = Status {
+            wivrn_running: wivrn.running,
+            headset_connected: wivrn.headset_connected,
+            headset_name: wivrn.system_name.clone(),
+            session_running: wivrn.session_running,
+            vrchat_running,
+            watchdog_paused: self.watch.suppressed,
+            wivrn_failures: self.watch.failures,
+            default_sink: self.cached_default_sink.clone(),
+            default_source: self.cached_default_source.clone(),
+            audio_on_vr: self.audio.on_vr,
+            entries: entry_status,
+            block_state: self.block_state.clone(),
+            sinks: self.cached_sinks.clone(),
+            sources: self.cached_sources.clone(),
+            virtual_display_created: self.virtual_display_created,
+            virtual_display_info: self.virtual_display_info.clone(),
+        };
+        self.shared.set_status(status);
+    }
+
+    fn update_virtual_display(&mut self, config: &Config) {
         let current_displays = display::get_connected_display_count();
         let now = Instant::now();
         let debounce_dur = Duration::from_secs(config.virtual_display.debounce_secs);
@@ -445,46 +469,24 @@ impl Engine {
                         }
                     }
                 }
-            } else {
-                if current_displays == 0 {
-                    // Displays disappeared again before debounce expired; cancel removal
-                    self.shared.info("Physical display disconnected before debounce elapsed; keeping virtual display");
-                    self.pending_virtual_display_action = None;
-                } else if now >= due_time {
-                    self.pending_virtual_display_action = None;
-                    if self.virtual_display_created {
-                        self.shared.info("Debounce elapsed; removing virtual display...");
-                        if display::remove_virtual_display() {
-                            self.virtual_display_created = false;
-                            self.virtual_display_info = None;
-                            self.shared.info("Virtual display removed");
-                        }
+            } else if current_displays == 0 {
+                // Displays disappeared again before debounce expired; cancel removal
+                self.shared.info("Physical display disconnected before debounce elapsed; keeping virtual display");
+                self.pending_virtual_display_action = None;
+            } else if now >= due_time {
+                self.pending_virtual_display_action = None;
+                if self.virtual_display_created {
+                    self.shared.info("Debounce elapsed; removing virtual display...");
+                    if display::remove_virtual_display() {
+                        self.virtual_display_created = false;
+                        self.virtual_display_info = None;
+                        self.shared.info("Virtual display removed");
                     }
                 }
             }
         }
 
         self.last_display_count = Some(current_displays);
-
-        let status = Status {
-            wivrn_running: wivrn.running,
-            headset_connected: wivrn.headset_connected,
-            headset_name: wivrn.system_name.clone(),
-            session_running: wivrn.session_running,
-            vrchat_running,
-            watchdog_paused: self.watch.suppressed,
-            wivrn_failures: self.watch.failures,
-            default_sink: self.cached_default_sink.clone(),
-            default_source: self.cached_default_source.clone(),
-            audio_on_vr: self.audio.on_vr,
-            entries: entry_status,
-            block_state: self.block_state.clone(),
-            sinks: self.cached_sinks.clone(),
-            sources: self.cached_sources.clone(),
-            virtual_display_created: self.virtual_display_created,
-            virtual_display_info: self.virtual_display_info.clone(),
-        };
-        self.shared.set_status(status);
     }
 
     fn trigger_active(

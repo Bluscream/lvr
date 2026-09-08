@@ -78,45 +78,9 @@ impl LvrTray {
         ));
         lines.join("\n")
     }
-}
 
-impl Tray for LvrTray {
-    fn id(&self) -> String {
-        env!("CARGO_PKG_NAME").to_string()
-    }
-
-    fn title(&self) -> String {
-        "LinuxVR".to_string()
-    }
-
-    fn category(&self) -> Category {
-        Category::Hardware
-    }
-
-    fn icon_pixmap(&self) -> Vec<Icon> {
-        tray_pixmaps(self.icon_state())
-    }
-
-    fn tool_tip(&self) -> ToolTip {
-        ToolTip {
-            title: "LinuxVR".to_string(),
-            description: self.summary(),
-            icon_name: String::new(),
-            icon_pixmap: tray_pixmaps(self.icon_state()),
-        }
-    }
-
-    fn activate(&mut self, _x: i32, _y: i32) {
-        self.shared.request_show_window();
-    }
-
-    fn menu(&self) -> Vec<MenuItem<Self>> {
-        let watchdog = self.shared.config().wivrn.watchdog;
-        let audio_auto = self.shared.config().audio.enabled;
-        let audio_on_vr = self.status.audio_on_vr;
-        let entries = self.status.entries.clone();
-
-        let mut items: Vec<MenuItem<Self>> = vec![
+    fn base_items(&self) -> Vec<MenuItem<Self>> {
+        vec![
             StandardItem {
                 label: "Open LinuxVR".into(),
                 icon_name: "window-new".into(),
@@ -164,43 +128,55 @@ impl Tray for LvrTray {
             }
             .into(),
             MenuItem::Separator,
-        ];
+        ]
+    }
 
-        if !entries.is_empty() {
-            let app_items: Vec<MenuItem<Self>> = entries
-                .into_iter()
-                .map(|entry| {
-                    let id = entry.id.clone();
-                    let running = entry.running;
-                    StandardItem {
-                        label: format!(
-                            "{} {}",
-                            if running { "■ Stop" } else { "▶ Start" },
-                            entry.name
-                        ),
-                        activate: Box::new(move |this: &mut Self| {
-                            this.shared.send(if running {
-                                Command::StopEntry(id.clone())
-                            } else {
-                                Command::StartEntry(id.clone())
-                            })
-                        }),
-                        ..Default::default()
-                    }
-                    .into()
-                })
-                .collect();
-            items.push(
-                SubMenu {
-                    label: "Managed apps".into(),
-                    submenu: app_items,
-                    ..Default::default()
-                }
-                .into(),
-            );
+    fn managed_apps_menu(&self) -> Option<MenuItem<Self>> {
+        let entries = &self.status.entries;
+        if entries.is_empty() {
+            return None;
         }
 
-        items.push(
+        let app_items: Vec<MenuItem<Self>> = entries
+            .iter()
+            .map(|entry| {
+                let id = entry.id.clone();
+                let running = entry.running;
+                StandardItem {
+                    label: format!(
+                        "{} {}",
+                        if running { "■ Stop" } else { "▶ Start" },
+                        entry.name
+                    ),
+                    activate: Box::new(move |this: &mut Self| {
+                        this.shared.send(if running {
+                            Command::StopEntry(id.clone())
+                        } else {
+                            Command::StartEntry(id.clone())
+                        })
+                    }),
+                    ..Default::default()
+                }
+                .into()
+            })
+            .collect();
+
+        Some(
+            SubMenu {
+                label: "Managed apps".into(),
+                submenu: app_items,
+                ..Default::default()
+            }
+            .into(),
+        )
+    }
+
+    fn toggle_items(&self) -> Vec<MenuItem<Self>> {
+        let watchdog = self.shared.config().wivrn.watchdog;
+        let audio_auto = self.shared.config().audio.enabled;
+        let audio_on_vr = self.status.audio_on_vr;
+
+        vec![
             StandardItem {
                 label: if audio_on_vr {
                     "Audio → desktop".into()
@@ -214,9 +190,7 @@ impl Tray for LvrTray {
                 ..Default::default()
             }
             .into(),
-        );
-        items.push(MenuItem::Separator);
-        items.push(
+            MenuItem::Separator,
             CheckmarkItem {
                 label: "WiVRn watchdog".into(),
                 checked: watchdog,
@@ -237,8 +211,6 @@ impl Tray for LvrTray {
                 ..Default::default()
             }
             .into(),
-        );
-        items.push(
             CheckmarkItem {
                 label: "Auto audio switching".into(),
                 checked: audio_auto,
@@ -258,9 +230,7 @@ impl Tray for LvrTray {
                 ..Default::default()
             }
             .into(),
-        );
-        items.push(MenuItem::Separator);
-        items.push(
+            MenuItem::Separator,
             StandardItem {
                 label: "Quit LinuxVR".into(),
                 icon_name: "application-exit".into(),
@@ -271,7 +241,46 @@ impl Tray for LvrTray {
                 ..Default::default()
             }
             .into(),
-        );
+        ]
+    }
+}
+
+impl Tray for LvrTray {
+    fn id(&self) -> String {
+        env!("CARGO_PKG_NAME").to_string()
+    }
+
+    fn title(&self) -> String {
+        "LinuxVR".to_string()
+    }
+
+    fn category(&self) -> Category {
+        Category::Hardware
+    }
+
+    fn icon_pixmap(&self) -> Vec<Icon> {
+        tray_pixmaps(self.icon_state())
+    }
+
+    fn tool_tip(&self) -> ToolTip {
+        ToolTip {
+            title: "LinuxVR".to_string(),
+            description: self.summary(),
+            icon_name: String::new(),
+            icon_pixmap: tray_pixmaps(self.icon_state()),
+        }
+    }
+
+    fn activate(&mut self, _x: i32, _y: i32) {
+        self.shared.request_show_window();
+    }
+
+    fn menu(&self) -> Vec<MenuItem<Self>> {
+        let mut items = self.base_items();
+        if let Some(apps) = self.managed_apps_menu() {
+            items.push(apps);
+        }
+        items.extend(self.toggle_items());
         items
     }
 }

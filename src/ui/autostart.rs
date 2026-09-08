@@ -5,7 +5,7 @@ use egui::{RichText, Ui};
 use super::widgets::{self, BLUE, GREEN, GREY, ORANGE, RED};
 use super::{EntryEditor, GraceMode, LvrApp};
 use crate::config::{AutostartEntry, Trigger};
-use crate::state::Command;
+use crate::state::{Command, EntryStatus};
 
 /// Pending structural change, applied after drawing so we never mutate the
 /// list while iterating.
@@ -56,110 +56,12 @@ pub fn show(app: &mut LvrApp, ui: &mut Ui) {
     let show_debug = app.shared.config().general.show_debug_info;
 
     egui::ScrollArea::vertical().show(ui, |ui| {
+        let total = entries.len();
         for (index, entry) in entries.iter().enumerate() {
             let status = app.status.entry(&entry.id).cloned().unwrap_or_default();
-
-            egui::Frame::new()
-                .fill(egui::Color32::from_black_alpha(35))
-                .stroke((1.0, egui::Color32::from_white_alpha(15)))
-                .corner_radius(egui::CornerRadius::same(6))
-                .inner_margin(egui::Margin::symmetric(10, 8))
-                .show(ui, |ui| {
-                    ui.horizontal(|ui| {
-                        // Checkbox
-                        let mut enabled = entry.enabled;
-                        if ui.add(egui::Checkbox::without_text(&mut enabled)).changed() {
-                            pending = Some(Pending::Toggle(entry.id.clone(), enabled));
-                        }
-
-                        // App Name & Subtext
-                        ui.vertical(|ui| {
-                            ui.label(RichText::new(entry.name_or_id()).size(14.0).strong());
-                            if entry.console {
-                                ui.label(RichText::new("console").size(10.0).color(GREY));
-                            }
-                        });
-
-                        ui.add_space(10.0);
-
-                        // Trigger
-                        let trig_color = if status.trigger_active { GREEN } else { GREY };
-                        ui.vertical(|ui| {
-                            ui.label(RichText::new("Trigger").size(10.0).color(GREY));
-                            ui.label(
-                                RichText::new(entry.trigger.to_string())
-                                    .size(12.0)
-                                    .color(trig_color),
-                            );
-                        });
-
-                        ui.add_space(10.0);
-
-                        // Stops / Grace
-                        let grace_color = if entry.keeps_running() { BLUE } else { GREY };
-                        ui.vertical(|ui| {
-                            ui.label(RichText::new("Stops").size(10.0).color(GREY));
-                            ui.label(
-                                RichText::new(widgets::format_grace(entry.grace_secs))
-                                    .size(12.0)
-                                    .color(grace_color),
-                            );
-                        });
-
-                        ui.add_space(10.0);
-
-                        // Status
-                        let status_color = widgets::on_off(status.running);
-                        ui.vertical(|ui| {
-                            ui.label(RichText::new("Status").size(10.0).color(GREY));
-                            ui.horizontal(|ui| {
-                                ui.label(RichText::new("⏺").size(12.0).color(status_color));
-                                ui.label(
-                                    RichText::new(super::dashboard::detail_line(&status, show_debug))
-                                        .size(11.0)
-                                        .color(GREY),
-                                );
-                            });
-                        });
-
-                        // Action Buttons: laid out right-to-left so Delete is anchored to the right margin
-                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                            if widgets::compact_button(ui, "Delete", Some(RED), 0.0).clicked() {
-                                pending = Some(Pending::Delete(entry.id.clone()));
-                            }
-                            if ui
-                                .add_enabled(
-                                    index + 1 < entries.len(),
-                                    egui::Button::new(RichText::new("Down").size(11.0))
-                                        .corner_radius(egui::CornerRadius::same(4)),
-                                )
-                                .clicked()
-                            {
-                                pending = Some(Pending::MoveDown(index));
-                            }
-                            if ui
-                                .add_enabled(
-                                    index > 0,
-                                    egui::Button::new(RichText::new("Up").size(11.0))
-                                        .corner_radius(egui::CornerRadius::same(4)),
-                                )
-                                .clicked()
-                            {
-                                pending = Some(Pending::MoveUp(index));
-                            }
-                            if widgets::compact_button(ui, "Edit", None, 0.0).clicked() {
-                                pending = Some(Pending::Edit(entry.id.clone()));
-                            }
-                            if status.running {
-                                if widgets::compact_button(ui, "Stop", Some(ORANGE), 0.0).clicked() {
-                                    pending = Some(Pending::Stop(entry.id.clone()));
-                                }
-                            } else if widgets::compact_button(ui, "Start", Some(GREEN), 0.0).clicked() {
-                                pending = Some(Pending::Start(entry.id.clone()));
-                            }
-                        });
-                    });
-                });
+            if let Some(action) = render_entry_row(ui, entry, index, total, &status, show_debug) {
+                pending = Some(action);
+            }
             ui.add_space(4.0);
         }
     });
@@ -167,6 +69,127 @@ pub fn show(app: &mut LvrApp, ui: &mut Ui) {
     if let Some(action) = pending {
         apply(app, action);
     }
+}
+
+fn render_entry_row(
+    ui: &mut Ui,
+    entry: &AutostartEntry,
+    index: usize,
+    total: usize,
+    status: &EntryStatus,
+    show_debug: bool,
+) -> Option<Pending> {
+    let mut pending = None;
+    egui::Frame::new()
+        .fill(egui::Color32::from_black_alpha(35))
+        .stroke((1.0, egui::Color32::from_white_alpha(15)))
+        .corner_radius(egui::CornerRadius::same(6))
+        .inner_margin(egui::Margin::symmetric(10, 8))
+        .show(ui, |ui| {
+            ui.horizontal(|ui| {
+                let mut enabled = entry.enabled;
+                if ui.add(egui::Checkbox::without_text(&mut enabled)).changed() {
+                    pending = Some(Pending::Toggle(entry.id.clone(), enabled));
+                }
+
+                ui.vertical(|ui| {
+                    ui.label(RichText::new(entry.name_or_id()).size(14.0).strong());
+                    if entry.console {
+                        ui.label(RichText::new("console").size(10.0).color(GREY));
+                    }
+                });
+
+                ui.add_space(10.0);
+
+                let trig_color = if status.trigger_active { GREEN } else { GREY };
+                ui.vertical(|ui| {
+                    ui.label(RichText::new("Trigger").size(10.0).color(GREY));
+                    ui.label(
+                        RichText::new(entry.trigger.to_string())
+                            .size(12.0)
+                            .color(trig_color),
+                    );
+                });
+
+                ui.add_space(10.0);
+
+                let grace_color = if entry.keeps_running() { BLUE } else { GREY };
+                ui.vertical(|ui| {
+                    ui.label(RichText::new("Stops").size(10.0).color(GREY));
+                    ui.label(
+                        RichText::new(widgets::format_grace(entry.grace_secs))
+                            .size(12.0)
+                            .color(grace_color),
+                    );
+                });
+
+                ui.add_space(10.0);
+
+                let status_color = widgets::on_off(status.running);
+                ui.vertical(|ui| {
+                    ui.label(RichText::new("Status").size(10.0).color(GREY));
+                    ui.horizontal(|ui| {
+                        ui.label(RichText::new("⏺").size(12.0).color(status_color));
+                        ui.label(
+                            RichText::new(super::dashboard::detail_line(status, show_debug))
+                                .size(11.0)
+                                .color(GREY),
+                        );
+                    });
+                });
+
+                if let Some(action) = render_row_actions(ui, entry, index, total, status.running) {
+                    pending = Some(action);
+                }
+            });
+        });
+    pending
+}
+
+fn render_row_actions(
+    ui: &mut Ui,
+    entry: &AutostartEntry,
+    index: usize,
+    total: usize,
+    running: bool,
+) -> Option<Pending> {
+    let mut pending = None;
+    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+        if widgets::compact_button(ui, "Delete", Some(RED), 0.0).clicked() {
+            pending = Some(Pending::Delete(entry.id.clone()));
+        }
+        if ui
+            .add_enabled(
+                index + 1 < total,
+                egui::Button::new(RichText::new("Down").size(11.0))
+                    .corner_radius(egui::CornerRadius::same(4)),
+            )
+            .clicked()
+        {
+            pending = Some(Pending::MoveDown(index));
+        }
+        if ui
+            .add_enabled(
+                index > 0,
+                egui::Button::new(RichText::new("Up").size(11.0))
+                    .corner_radius(egui::CornerRadius::same(4)),
+            )
+            .clicked()
+        {
+            pending = Some(Pending::MoveUp(index));
+        }
+        if widgets::compact_button(ui, "Edit", None, 0.0).clicked() {
+            pending = Some(Pending::Edit(entry.id.clone()));
+        }
+        if running {
+            if widgets::compact_button(ui, "Stop", Some(ORANGE), 0.0).clicked() {
+                pending = Some(Pending::Stop(entry.id.clone()));
+            }
+        } else if widgets::compact_button(ui, "Start", Some(GREEN), 0.0).clicked() {
+            pending = Some(Pending::Start(entry.id.clone()));
+        }
+    });
+    pending
 }
 
 fn apply(app: &mut LvrApp, action: Pending) {
@@ -260,25 +283,7 @@ pub fn editor_body(ui: &mut Ui, editor: &mut EntryEditor) {
             ui.end_row();
 
             ui.label("Start trigger");
-            ui.vertical(|ui| {
-                let kinds = crate::config::Trigger::KINDS;
-                egui::ComboBox::from_id_salt("editor-trigger-kind")
-                    .selected_text(kinds.get(editor.trigger_kind).copied().unwrap_or("Manual only"))
-                    .show_ui(ui, |ui| {
-                        for (index, kind) in kinds.iter().enumerate() {
-                            if ui.selectable_label(editor.trigger_kind == index, *kind).clicked() {
-                                editor.trigger_kind = index;
-                            }
-                        }
-                    });
-                if editor.trigger_kind == 3 {
-                    ui.add(
-                        egui::TextEdit::singleline(&mut editor.trigger_process)
-                            .desired_width(360.0)
-                            .hint_text("executable substring, e.g. OBS.exe"),
-                    );
-                }
-            });
+            render_editor_trigger_field(ui, editor);
             ui.end_row();
 
             ui.label("Start delay");
@@ -293,21 +298,7 @@ pub fn editor_body(ui: &mut Ui, editor: &mut EntryEditor) {
             ui.end_row();
 
             ui.label("Stop behavior");
-            ui.vertical(|ui| {
-                ui.radio_value(&mut editor.grace_mode, GraceMode::After, "Stop after grace period");
-                if editor.grace_mode == GraceMode::After {
-                    ui.horizontal(|ui| {
-                        ui.add_space(20.0);
-                        ui.add(
-                            egui::DragValue::new(&mut editor.grace_secs)
-                                .range(1..=86400)
-                                .suffix(" seconds"),
-                        );
-                    });
-                }
-                ui.radio_value(&mut editor.grace_mode, GraceMode::Immediately, "Stop immediately when trigger disappears");
-                ui.radio_value(&mut editor.grace_mode, GraceMode::KeepRunning, "Keep running (never stops automatically)");
-            });
+            render_editor_stop_behavior_field(ui, editor);
             ui.end_row();
 
             ui.label("Match patterns");
@@ -329,6 +320,46 @@ pub fn editor_body(ui: &mut Ui, editor: &mut EntryEditor) {
             });
             ui.end_row();
         });
+}
+
+fn render_editor_trigger_field(ui: &mut Ui, editor: &mut EntryEditor) {
+    ui.vertical(|ui| {
+        let kinds = crate::config::Trigger::KINDS;
+        egui::ComboBox::from_id_salt("editor-trigger-kind")
+            .selected_text(kinds.get(editor.trigger_kind).copied().unwrap_or("Manual only"))
+            .show_ui(ui, |ui| {
+                for (index, kind) in kinds.iter().enumerate() {
+                    if ui.selectable_label(editor.trigger_kind == index, *kind).clicked() {
+                        editor.trigger_kind = index;
+                    }
+                }
+            });
+        if editor.trigger_kind == 3 {
+            ui.add(
+                egui::TextEdit::singleline(&mut editor.trigger_process)
+                    .desired_width(360.0)
+                    .hint_text("executable substring, e.g. OBS.exe"),
+            );
+        }
+    });
+}
+
+fn render_editor_stop_behavior_field(ui: &mut Ui, editor: &mut EntryEditor) {
+    ui.vertical(|ui| {
+        ui.radio_value(&mut editor.grace_mode, GraceMode::After, "Stop after grace period");
+        if editor.grace_mode == GraceMode::After {
+            ui.horizontal(|ui| {
+                ui.add_space(20.0);
+                ui.add(
+                    egui::DragValue::new(&mut editor.grace_secs)
+                        .range(1..=86400)
+                        .suffix(" seconds"),
+                );
+            });
+        }
+        ui.radio_value(&mut editor.grace_mode, GraceMode::Immediately, "Stop immediately when trigger disappears");
+        ui.radio_value(&mut editor.grace_mode, GraceMode::KeepRunning, "Keep running (never stops automatically)");
+    });
 }
 
 #[cfg(test)]
