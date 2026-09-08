@@ -338,32 +338,16 @@ fn render_domains_blocked_grid(ui: &mut Ui, lists: &crate::domain_block::DomainL
             ui.label(RichText::new("Total").strong());
             ui.end_row();
 
-            // Stats per list
-            for stat in &lists.list_stats {
-                ui.label(RichText::new(&stat.name).strong());
-                if stat.enabled {
-                    for cat in &categories {
-                        ui.label(stat.counts.for_category(cat).to_string());
-                    }
-                    ui.label(RichText::new(stat.counts.total().to_string()).strong());
-                } else {
-                    for _ in &categories {
-                        ui.label("-");
-                    }
-                    ui.label(RichText::new("disabled").color(GREY));
-                }
-                ui.end_row();
-            }
-
-            // Total row
-            ui.label(RichText::new("Total").strong());
+            // Row with category counts
+            ui.label(RichText::new("Pre-compiled").strong());
             for cat in &categories {
-                ui.label(RichText::new(lists.total_counts.for_category(cat).to_string()).strong());
+                ui.label(lists.count_for_category(cat).to_string());
             }
-            ui.label(RichText::new(lists.total_counts.total().to_string()).strong().color(GREEN));
+            ui.label(RichText::new(lists.total_count().to_string()).strong().color(GREEN));
             ui.end_row();
         });
 }
+
 
 fn render_vrc_prefix_section(ui: &mut Ui, prefix_opt: Option<&std::path::Path>) {
     match prefix_opt {

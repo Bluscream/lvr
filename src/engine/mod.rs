@@ -173,12 +173,13 @@ impl Engine {
                 }
                 self.shared.info(format!(
                     "Updated active domain lists: {} videos, {} images, {} strings, {} shared (total: {})",
-                    lists.video_domains.len(),
-                    lists.image_domains.len(),
-                    lists.string_domains.len(),
-                    lists.rest_domains.len(),
-                    lists.total_counts.total()
+                    lists.count_for_category(&crate::domain_block::BlockCategory::Video),
+                    lists.count_for_category(&crate::domain_block::BlockCategory::Images),
+                    lists.count_for_category(&crate::domain_block::BlockCategory::Strings),
+                    lists.count_for_category(&crate::domain_block::BlockCategory::Rest),
+                    lists.total_count()
                 ));
+
             }
             Command::CreateVirtualDisplay => {
                 self.pending_virtual_display_action = None;
