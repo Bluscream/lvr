@@ -2,5 +2,8 @@
 /todo.md
 .references/
 !assets/lists/config.jsontests/dns_test/bin
-tests/dns_test/obj
+/tests/dns_test/bin/
+/tests/dns_test/obj/
+**/bin/
+**/obj/
 c_src/liblvr_dns_shield.so
