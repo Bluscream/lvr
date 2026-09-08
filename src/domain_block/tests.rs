@@ -394,3 +394,101 @@ fn local_community_json_loads_analytics_category() {
     assert!(analytics_domains.contains(&"api.amplitude.com".to_string()));
     assert!(analytics_domains.len() >= 100);
 }
+
+#[test]
+fn hosts_file_has_zero_duplicates_and_always_blocks_www_equivalent() {
+    let temp_dir = std::env::temp_dir().join(format!("lvr_test_hosts_{}", std::process::id()));
+    let _ = fs::create_dir_all(&temp_dir);
+    let mut state = BlockState {
+        video_blocked: true,
+        images_blocked: true,
+        strings_blocked: true,
+        rest_blocked: true,
+        custom_blocked: std::collections::BTreeMap::new(),
+    };
+    state.set_blocked(&BlockCategory::Custom("Analytics".to_string()), true);
+
+    sync_all(&temp_dir, &state).expect("sync_all to temp prefix");
+
+    let hosts_path = prefix_hosts_path(&temp_dir);
+    let content = fs::read_to_string(&hosts_path).expect("read hosts file");
+
+    let mut seen = std::collections::HashSet::new();
+    let mut category_by_host = std::collections::HashMap::new();
+    let mut current_cat = "UNKNOWN";
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        if trimmed.starts_with("# ----- BEGIN LVR ") {
+            current_cat = trimmed;
+            continue;
+        }
+        if trimmed.starts_with("# ----- END LVR ") {
+            current_cat = "NONE";
+            continue;
+        }
+        if let Some(host) = trimmed.strip_prefix("0.0.0.0 ") {
+            let host = host.trim().to_lowercase();
+            assert!(
+                seen.insert(host.clone()),
+                "Duplicate host found in hosts file: {host}"
+            );
+            if let Some(prev_cat) = category_by_host.insert(host.clone(), current_cat) {
+                panic!("Host {host} was emitted in both {prev_cat} and {current_cat}!");
+            }
+        }
+    }
+
+    // Verify www equivalent rule: for every host foo, www.foo must also exist
+    for host in &seen {
+        if let Some(stripped) = host.strip_prefix("www.") {
+            assert!(
+                seen.contains(stripped),
+                "Missing base domain {stripped} for www host {host}"
+            );
+        } else {
+            let with_www = format!("www.{host}");
+            assert!(
+                seen.contains(&with_www),
+                "Missing www equivalent {with_www} for host {host}"
+            );
+        }
+    }
+
+    let _ = fs::remove_dir_all(&temp_dir);
+}
+
+#[test]
+fn all_categories_are_mutually_exclusive_by_canonical_key() {
+    let lists = build_domain_lists_fallback_with_community(true);
+    let mut cat_map: std::collections::HashMap<String, BlockCategory> =
+        std::collections::HashMap::new();
+
+    for cat in lists.all_categories() {
+        for domain in lists.domains_for_category(&cat) {
+            let key = canonical_domain_key(domain);
+            if let Some(existing_cat) = cat_map.get(&key) {
+                if existing_cat != &cat {
+                    panic!(
+                        "Domain key '{key}' (from '{domain}') exists in both {:?} and {:?}! Categories must be mutually exclusive.",
+                        existing_cat, cat
+                    );
+                }
+            } else {
+                cat_map.insert(key, cat.clone());
+            }
+        }
+    }
+}
+
+#[test]
+#[ignore]
+fn sync_real_vrc_prefix_hosts() {
+    let prefix = std::path::Path::new("/run/media/system/Data/Games/Steam/steamapps/compatdata/438100");
+    if prefix.is_dir() {
+        let state = read_block_state(prefix);
+        sync_all(prefix, &state).expect("sync to real prefix");
+    }
+}
+
+

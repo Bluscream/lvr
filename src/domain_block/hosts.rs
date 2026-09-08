@@ -1,3 +1,4 @@
+use std::collections::HashSet;
 use std::fs;
 use std::io::Write;
 use std::os::unix::fs::PermissionsExt;
@@ -132,16 +133,24 @@ fn update_hosts_file(prefix: &Path, state: &BlockState) -> Result<()> {
         result.push('\n');
     }
 
+    // Keep track of hostnames already emitted in the file to guarantee zero duplicates.
+    let mut emitted_hosts = HashSet::new();
+
+    // Track existing non-LVR blocked hosts so we don't duplicate them either
+    for line in &cleaned {
+        let trimmed = line.trim();
+        if trimmed.starts_with("0.0.0.0 ") || trimmed.starts_with("127.0.0.1 ") {
+            for part in trimmed.split_whitespace().skip(1) {
+                emitted_hosts.insert(part.to_lowercase());
+            }
+        }
+    }
+
     // Append blocks for whichever categories are enabled
     let lists = active_domains();
     for cat in lists.all_categories() {
         if state.is_blocked(&cat) {
-            result.push_str(&cat.header_tag());
-            result.push('\n');
-            result.push_str(&format!(
-                "# Blocked by LinuxVR (lvr): {}\n",
-                cat.label()
-            ));
+            let mut category_lines = Vec::new();
 
             for domain in lists.domains_for_category(&cat) {
                 let bare = domain.trim_start_matches("*.");
@@ -152,14 +161,45 @@ fn update_hosts_file(prefix: &Path, state: &BlockState) -> Result<()> {
                 if bare.parse::<std::net::IpAddr>().is_ok() {
                     continue;
                 }
-                result.push_str(&format!("0.0.0.0 {bare}\n"));
-                if !domain.starts_with("*.") && !domain.starts_with("www.") {
-                    result.push_str(&format!("0.0.0.0 www.{bare}\n"));
+
+                // Determine both base domain and www equivalent
+                let (base, www) = if let Some(stripped) = bare.strip_prefix("www.") {
+                    (stripped, bare)
+                } else {
+                    (bare, "")
+                };
+
+                // Emit base domain
+                let base_lower = base.to_lowercase();
+                if emitted_hosts.insert(base_lower.clone()) {
+                    category_lines.push(format!("0.0.0.0 {base_lower}"));
+                }
+
+                // Always emit www equivalent as well, whether source had *. or not
+                let www_lower = if www.is_empty() {
+                    format!("www.{base_lower}")
+                } else {
+                    www.to_lowercase()
+                };
+                if emitted_hosts.insert(www_lower.clone()) {
+                    category_lines.push(format!("0.0.0.0 {www_lower}"));
                 }
             }
 
-            result.push_str(&cat.footer_tag());
-            result.push('\n');
+            if !category_lines.is_empty() {
+                result.push_str(&cat.header_tag());
+                result.push('\n');
+                result.push_str(&format!(
+                    "# Blocked by LinuxVR (lvr): {}\n",
+                    cat.label()
+                ));
+                for line in category_lines {
+                    result.push_str(&line);
+                    result.push('\n');
+                }
+                result.push_str(&cat.footer_tag());
+                result.push('\n');
+            }
         }
     }
 

@@ -372,27 +372,35 @@ fn ensure_core_asset_wildcards(protected: &mut HashSet<String>) {
     }
 }
 
-fn find_multi_list_domains(
+pub fn canonical_domain_key(domain: &str) -> String {
+    let s = clean_domain_entry(domain);
+    let bare = s.trim_start_matches("*.");
+    if let Some(rest) = bare.strip_prefix("www.")
+        && rest.contains('.')
+    {
+        return rest.to_string();
+    }
+    bare.to_string()
+}
+
+fn find_multi_list_canonical_keys(
     raw_domains_by_cat: &BTreeMap<BlockCategory, HashSet<String>>,
 ) -> HashSet<String> {
-    let mut in_multiple = HashSet::new();
-    let mut all_unique_domains: HashSet<String> = HashSet::new();
-    for set in raw_domains_by_cat.values() {
-        all_unique_domains.extend(set.iter().cloned());
+    let mut cat_by_canonical: BTreeMap<String, HashSet<BlockCategory>> = BTreeMap::new();
+    for (cat, set) in raw_domains_by_cat {
+        for d in set {
+            cat_by_canonical
+                .entry(canonical_domain_key(d))
+                .or_default()
+                .insert(cat.clone());
+        }
     }
 
-    for d in &all_unique_domains {
-        let mut category_count = 0;
-        for set in raw_domains_by_cat.values() {
-            if set.contains(d) {
-                category_count += 1;
-            }
-        }
-        if category_count >= 2 {
-            in_multiple.insert(d.clone());
-        }
-    }
-    in_multiple
+    cat_by_canonical
+        .into_iter()
+        .filter(|(_, cats)| cats.len() >= 2)
+        .map(|(k, _)| k)
+        .collect()
 }
 
 fn is_vrc_or_asset_protected(d: &str, protected: &HashSet<String>) -> bool {
@@ -415,10 +423,11 @@ fn classify_domains(
     raw_domains_by_cat: &BTreeMap<BlockCategory, HashSet<String>>,
     protected: &HashSet<String>,
 ) -> ClassifiedDomains {
-    let in_multiple = find_multi_list_domains(raw_domains_by_cat);
+    let multi_keys = find_multi_list_canonical_keys(raw_domains_by_cat);
 
     let is_pure_category_protected = |d: &str| -> bool {
-        in_multiple.contains(d) || is_vrc_or_asset_protected(d, protected)
+        let key = canonical_domain_key(d);
+        multi_keys.contains(&key) || is_vrc_or_asset_protected(d, protected)
     };
 
     let mut video_domains: Vec<String> = raw_domains_by_cat
@@ -464,9 +473,17 @@ fn classify_domains(
         }
     }
 
-    let mut rest_domains: Vec<String> = in_multiple
+    let mut all_unique_domains: HashSet<String> = HashSet::new();
+    for set in raw_domains_by_cat.values() {
+        all_unique_domains.extend(set.iter().cloned());
+    }
+
+    let mut rest_domains: Vec<String> = all_unique_domains
         .into_iter()
-        .filter(|d| !is_vrc_or_asset_protected(d, protected))
+        .filter(|d| {
+            let key = canonical_domain_key(d);
+            multi_keys.contains(&key) && !is_vrc_or_asset_protected(d, protected)
+        })
         .collect();
 
     video_domains.sort();
