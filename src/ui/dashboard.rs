@@ -157,32 +157,6 @@ fn render_domain_shields(app: &mut LvrApp, ui: &mut Ui) {
             }
         }
     });
-
-    ui.add_space(4.0);
-    ui.horizontal(|ui| {
-        let mut config = app.shared.config();
-        if widgets::toggle(
-            ui,
-            &mut config.domain_block.load_community_blocklists,
-            "Load Community Blocklists",
-        ) {
-            app.send(Command::ReloadDomainLists);
-            app.send(Command::SaveConfig);
-        }
-
-        let lists = crate::domain_block::active_domains();
-        ui.label(
-            RichText::new(format!(
-                "({} videos · {} images · {} strings · {} shared)",
-                lists.video_domains.len(),
-                lists.image_domains.len(),
-                lists.string_domains.len(),
-                lists.rest_domains.len()
-            ))
-            .size(12.0)
-            .color(GREY),
-        );
-    });
 }
 
 /// Section 4: Quick Action Controls
