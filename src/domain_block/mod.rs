@@ -224,6 +224,22 @@ pub async fn fetch_domains_json_remote() -> Result<String> {
     Ok(response.text().await?)
 }
 
+/// Filters out any direct IP addresses (IPv4 or IPv6) from domain lists.
+pub fn sanitize_domain_map(raw: BTreeMap<String, Vec<String>>) -> BTreeMap<String, Vec<String>> {
+    raw.into_iter()
+        .map(|(cat, list)| {
+            let filtered: Vec<String> = list
+                .into_iter()
+                .filter(|d| {
+                    let bare = d.trim_start_matches("*.");
+                    bare.parse::<IpAddr>().is_err() && d.parse::<IpAddr>().is_err()
+                })
+                .collect();
+            (cat, filtered)
+        })
+        .collect()
+}
+
 /// Loads domains into memory with priority:
 /// 1. Fresh local cached `domains.json` (< 1 hour old)
 /// 2. Remote GitHub fetch of `domains.json`
@@ -238,7 +254,7 @@ pub async fn load_domains() -> BTreeMap<String, Vec<String>> {
         && let Ok(parsed) = serde_json::from_str::<BTreeMap<String, Vec<String>>>(&content)
     {
         tracing::debug!("Loaded domains from fresh local cache at {}", cache_file.display());
-        return parsed;
+        return sanitize_domain_map(parsed);
     }
 
     // 2. Fetch pre-compiled domains.json from GitHub
@@ -250,7 +266,7 @@ pub async fn load_domains() -> BTreeMap<String, Vec<String>> {
                 }
                 let _ = fs::write(&cache_file, &body);
                 tracing::info!("Fetched and cached domains.json from GitHub");
-                return parsed;
+                return sanitize_domain_map(parsed);
             }
         }
         Err(err) => {
@@ -263,7 +279,7 @@ pub async fn load_domains() -> BTreeMap<String, Vec<String>> {
         Ok(vrc_body) => {
             if let Ok(parsed) = vrchat_config::parse_vrchat_config_to_categories(&vrc_body) {
                 tracing::info!("Parsed domains from live VRChat remote config");
-                return parsed;
+                return sanitize_domain_map(parsed);
             }
         }
         Err(err) => {
@@ -272,7 +288,7 @@ pub async fn load_domains() -> BTreeMap<String, Vec<String>> {
     }
 
     // 4. Embedded compile-time VRChat fallback config
-    vrchat_config::get_embedded_fallback_categories()
+    sanitize_domain_map(vrchat_config::get_embedded_fallback_categories())
 }
 
 /// Returns currently active domain lists in memory.
@@ -450,7 +466,13 @@ pub fn update_hosts_file(prefix: &Path, state: &BlockState) -> Result<()> {
         if state.is_blocked(&cat)
             && let Some(domain_list) = lists.domains.get(cat.name())
         {
-            builder.add_hostnames(zero_ip, domain_list);
+            let valid_hostnames: Vec<&String> = domain_list
+                .iter()
+                .filter(|d| d.parse::<IpAddr>().is_err() && !d.trim_start_matches("*.").parse::<IpAddr>().is_ok())
+                .collect();
+            if !valid_hostnames.is_empty() {
+                builder.add_hostnames(zero_ip, valid_hostnames);
+            }
         }
 
         // If unblocked (empty builder), hostsfile automatically deletes the section!
@@ -591,6 +613,29 @@ mod tests {
         assert!(!cleared_content.contains("youtube.com"));
 
         let _ = fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    fn sanitize_domain_map_strips_ip_addresses() {
+        let mut raw = BTreeMap::new();
+        raw.insert(
+            "Video".to_string(),
+            vec![
+                "youtube.com".to_string(),
+                "127.0.0.1".to_string(),
+                "100.100.1.10".to_string(),
+                "178.254.25.37".to_string(),
+                "192.168.2.10".to_string(),
+                "84.146.79.168".to_string(),
+                "::1".to_string(),
+                "*.twitch.tv".to_string(),
+                "*.127.0.0.1".to_string(),
+            ],
+        );
+
+        let sanitized = sanitize_domain_map(raw);
+        let video = sanitized.get("Video").unwrap();
+        assert_eq!(video, &["youtube.com", "*.twitch.tv"]);
     }
 }
 

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Build and compile pre-filtered, mutually exclusive hosts files on the build box / CI.
+Build and compile pre-filtered, mutually exclusive domains.json on the build box / CI.
 
 Pipeline:
 1. Fetches official VRChat remote config from https://api.vrchat.cloud/api/1/config
@@ -16,16 +16,11 @@ Pipeline:
 6. Filters out protected core VRChat domains and whiteListedAssetUrls.
 7. Enforces mutual exclusivity: any domain that appears in >= 2 categories is removed from
    those categories and assigned exclusively to the "Shared" category.
-8. Writes out clean, individual category hosts files into assets/lists/hosts/:
-   - Video.hosts
-   - Images.hosts
-   - Strings.hosts
-   - Analytics.hosts (and any other custom categories)
-   - Shared.hosts
-   Each host entry includes its www.* equivalent and a trailing comment `# <sources>`.
+8. Writes out assets/lists/domains.json containing all blocklists in a single flat JSON.
 """
 
 import csv
+import ipaddress
 import json
 import os
 import re
@@ -38,7 +33,6 @@ from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 LISTS_DIR = PROJECT_ROOT / "assets" / "lists"
-HOSTS_OUT_DIR = LISTS_DIR / "hosts"
 COMMUNITY_JSON_PATH = LISTS_DIR / "community.json"
 FALLBACK_CONFIG_PATH = PROJECT_ROOT / "assets" / "vrchat_config_fallback.json"
 SCRIPTS_DIR = PROJECT_ROOT / "scripts"
@@ -77,12 +71,13 @@ def is_valid_domain_or_glob(entry: str) -> bool:
     cleaned = clean_domain(entry)
     if not cleaned or cleaned == "localhost":
         return False
-    # Check IP
-    parts = cleaned.split(".")
-    if len(parts) == 4 and all(p.isdigit() and 0 <= int(p) <= 255 for p in parts):
-        return True
-
+    # Never allow IP addresses (IPv4 or IPv6) as blockable hostnames
     bare = cleaned.lstrip("*.")
+    try:
+        ipaddress.ip_address(bare)
+        return False
+    except ValueError:
+        pass
     if not bare or bare.startswith(".") or bare.endswith(".") or ".." in bare or "." not in bare:
         return False
 
@@ -256,49 +251,7 @@ def main():
 
     final_categories["Shared"] = list(shared_set)
 
-    # 7. Write out category .hosts files to assets/lists/hosts/
-    HOSTS_OUT_DIR.mkdir(parents=True, exist_ok=True)
-
-    summary = {}
-    for cat, d_list in sorted(final_categories.items()):
-        file_path = HOSTS_OUT_DIR / f"{cat}.hosts"
-        emitted_hosts = set()
-        lines = [
-            f"# ==============================================================================",
-            f"# LVR Blocklist: {cat} Category",
-            f"# Total base domains: {len(d_list)}",
-            f"# ==============================================================================\n",
-        ]
-
-        # Sort domains
-        sorted_domains = sorted(set(d_list))
-        for d in sorted_domains:
-            # If the entry starts with *. (e.g. *.facebook.com), strip *. and write normal domain (facebook.com).
-            # Only include www. if the source entry actually had www. in front (e.g. www.facebook.com).
-            bare = d.lstrip("*.")
-            if not bare or bare == "localhost":
-                continue
-            # Skip IP addresses in hosts file
-            parts = bare.split(".")
-            if len(parts) == 4 and all(p.isdigit() and 0 <= int(p) <= 255 for p in parts):
-                continue
-
-            sources = sorted(domain_sources.get(canonical_domain_key(bare), ["Community"]))
-            comment = f"  # {', '.join(sources)}" if sources else ""
-
-            host_lower = bare.lower()
-            if host_lower not in emitted_hosts:
-                emitted_hosts.add(host_lower)
-                lines.append(f"0.0.0.0 {host_lower}{comment}")
-
-        with open(file_path, "w", encoding="utf-8") as f:
-            f.write("\n".join(lines))
-            f.write("\n")
-
-        summary[cat] = len(sorted_domains)
-        print(f"Generated {file_path} ({len(sorted_domains)} base domains, {len(emitted_hosts)} hosts)")
-
-    # 8. Output assets/lists/domains.json containing all blocklists in a single flat JSON:
+    # 7. Output assets/lists/domains.json containing all blocklists in a single flat JSON:
     # {
     #   "Analytics": [...],
     #   "Video": [...]
@@ -314,10 +267,8 @@ def main():
         f.write("\n")
 
     print(f"\nGenerated unified domains bundle at: {domains_json_path} ({len(domains_json_data)} categories)")
-
-    print("\nPre-computed hosts files generated successfully:")
-    for cat, count in summary.items():
-        print(f"  - {cat}.hosts: {count} domains")
+    for cat, d_list in sorted(domains_json_data.items()):
+        print(f"  - {cat}: {len(d_list)} domains")
 
 
 if __name__ == "__main__":

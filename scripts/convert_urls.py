@@ -11,8 +11,6 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 URLS_DIR = PROJECT_ROOT / ".references" / "urls"
 REFERENCES_DOMAINS_DIR = PROJECT_ROOT / ".references" / "domains"
 LISTS_DIR = PROJECT_ROOT / "assets" / "lists"
-
-HOSTS_OUTPUT_PATH = LISTS_DIR / "all.hosts"
 CONFIG_JSON_PATH = LISTS_DIR / "community.json"
 
 # Blacklist of internal VRChat domains that shouldn't be included
@@ -47,7 +45,12 @@ def extract_domain(raw_url: str) -> str | None:
         if ":" in netloc:
             netloc = netloc.split(":")[0]
         netloc = netloc.rstrip(".")
-        return netloc if netloc else None
+        if not netloc:
+            return None
+        # Never treat IP addresses as blockable domains
+        if IP_REGEX.match(netloc):
+            return None
+        return netloc
     except Exception:
         return None
 
@@ -67,12 +70,6 @@ def read_urls_from_csv(csv_path: Path) -> list[str]:
     return urls
 
 
-def write_txt_domain_list(txt_path: Path, domains: list[str]) -> None:
-    with open(txt_path, "w", encoding="utf-8") as f:
-        for d in domains:
-            f.write(f"{d}\n")
-
-
 def write_reference_domain_csv(csv_path: Path, domains: list[str]) -> None:
     csv_path.parent.mkdir(parents=True, exist_ok=True)
     with open(csv_path, "w", newline="", encoding="utf-8") as f:
@@ -80,48 +77,6 @@ def write_reference_domain_csv(csv_path: Path, domains: list[str]) -> None:
         writer.writerow(["domain"])
         for d in domains:
             writer.writerow([d])
-
-
-def generate_hosts_file(data: dict[str, list[str]], output_path: Path) -> None:
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-
-    lines = [
-        "# ==============================================================================",
-        "# VRChat Content Domains - HOSTS file format",
-        "# Grouped by type: Video, Image, and String",
-        "# ==============================================================================\n"
-    ]
-
-    section_meta = [
-        ("video", "VIDEO STREAMING & HOSTING DOMAINS"),
-        ("image", "UDON IMAGE & PICTURE DOMAINS"),
-        ("string", "UDON STRING DOWNLOAD DOMAINS"),
-    ]
-
-    for dtype, title in section_meta:
-        domains = data[dtype]
-        named = [d for d in domains if not IP_REGEX.match(d)]
-        ips = [d for d in domains if IP_REGEX.match(d)]
-
-        lines.append("# ------------------------------------------------------------------------------")
-        lines.append(f"# {title} ({len(domains)} entries)")
-        lines.append("# ------------------------------------------------------------------------------")
-
-        for d in named:
-            other_types = [t for t, dlist in data.items() if t != dtype and d in dlist]
-            extra_note = f" [Also used for: {', '.join(other_types)}]" if other_types else ""
-            lines.append(f"0.0.0.0 {d}  # {dtype.capitalize()} domain{extra_note}")
-
-        if ips:
-            lines.append(f"# Direct IP endpoints observed in {dtype} URLs:")
-            for ip in ips:
-                lines.append(f"# {ip}  # Direct IP endpoint")
-
-        lines.append("")
-
-    with open(output_path, "w", encoding="utf-8") as f:
-        f.write("\n".join(lines))
-    print(f"Wrote HOSTS file to: {output_path} ({len(lines)} lines)")
 
 
 def update_config_json(data: dict[str, list[str]], config_path: Path) -> None:
@@ -167,18 +122,11 @@ def main():
         domain_data[cat] = sorted_domains
         print(f"[{cat}] Processed {len(urls)} URLs -> {len(sorted_domains)} unique domains (blacklisted removed)")
 
-        # Also write the .txt list in assets/lists/ if desired
-        txt_path = LISTS_DIR / f"{cat}.txt"
-        write_txt_domain_list(txt_path, sorted_domains)
-
         # Update .references/domains/<cat>.csv
         ref_csv = REFERENCES_DOMAINS_DIR / f"{cat}.csv"
         write_reference_domain_csv(ref_csv, sorted_domains)
 
-    # 1. Output assets/lists/all.hosts
-    generate_hosts_file(domain_data, HOSTS_OUTPUT_PATH)
-
-    # 2. Output assets/lists/config.json
+    # Output assets/lists/community.json
     update_config_json(domain_data, CONFIG_JSON_PATH)
 
 

@@ -81,6 +81,10 @@ fn is_valid_domain(d: &str) -> bool {
     {
         return false;
     }
+    // Never allow IP addresses (IPv4 or IPv6) as blockable hostnames
+    if bare.parse::<std::net::IpAddr>().is_ok() {
+        return false;
+    }
     if bare.starts_with("vrc.") || bare.starts_with("unityengine.") || bare.starts_with("system.") {
         return false;
     }
