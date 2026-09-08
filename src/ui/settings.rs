@@ -356,6 +356,18 @@ fn virtual_display(app: &mut LvrApp, ui: &mut Ui) {
             }
             ui.end_row();
 
+            ui.label("Debounce delay");
+            {
+                let mut config = app.shared.config();
+                ui.add(
+                    egui::DragValue::new(&mut config.virtual_display.debounce_secs)
+                        .range(0..=60)
+                        .speed(1.0)
+                        .suffix(" s"),
+                );
+            }
+            ui.end_row();
+
             ui.label("Resolution mode");
             {
                 let mut config = app.shared.config();

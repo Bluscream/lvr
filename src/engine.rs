@@ -212,6 +212,7 @@ pub struct Engine {
     virtual_display_created: bool,
     virtual_display_info: Option<String>,
     last_display_count: Option<usize>,
+    pending_virtual_display_action: Option<(bool, Instant)>,
 }
 
 /// Cached Steam profile state, refreshed on a slow timer.
@@ -255,6 +256,7 @@ impl Engine {
             virtual_display_created: false,
             virtual_display_info: None,
             last_display_count: None,
+            pending_virtual_display_action: None,
         }
     }
 
@@ -337,6 +339,7 @@ impl Engine {
                 self.set_block_category(category, block).await;
             }
             Command::CreateVirtualDisplay => {
+                self.pending_virtual_display_action = None;
                 let res = self.shared.config().virtual_display.resolution.clone();
                 if let Some(info) = display::create_virtual_display(&res) {
                     self.virtual_display_created = true;
@@ -347,6 +350,7 @@ impl Engine {
                 }
             }
             Command::RemoveVirtualDisplay => {
+                self.pending_virtual_display_action = None;
                 display::remove_virtual_display();
                 self.virtual_display_created = false;
                 self.virtual_display_info = None;
@@ -382,24 +386,86 @@ impl Engine {
         self.refresh_media_block_cache();
 
         let current_displays = display::get_connected_display_count();
+        let now = Instant::now();
+        let debounce_dur = Duration::from_secs(config.virtual_display.debounce_secs);
+
         if let Some(last_count) = self.last_display_count {
             if last_count > 0 && current_displays == 0 && config.virtual_display.create_on_last_display_unplugged {
-                self.shared.warn("Last physical display unplugged, creating virtual display...");
-                let res = config.virtual_display.resolution.clone();
-                if let Some(info) = display::create_virtual_display(&res) {
-                    self.virtual_display_created = true;
-                    self.virtual_display_info = Some(info.clone());
-                    self.shared.info(format!("Virtual display {info} created on display disconnect"));
+                if debounce_dur.is_zero() {
+                    self.pending_virtual_display_action = None;
+                    self.shared.warn("Last physical display unplugged, creating virtual display...");
+                    let res = config.virtual_display.resolution.clone();
+                    if let Some(info) = display::create_virtual_display(&res) {
+                        self.virtual_display_created = true;
+                        self.virtual_display_info = Some(info.clone());
+                        self.shared.info(format!("Virtual display {info} created on display disconnect"));
+                    }
+                } else {
+                    self.shared.warn(format!(
+                        "Last physical display unplugged; debouncing virtual display creation for {}s...",
+                        config.virtual_display.debounce_secs
+                    ));
+                    self.pending_virtual_display_action = Some((true, now + debounce_dur));
                 }
-            } else if last_count == 0 && current_displays > 0 && self.virtual_display_created {
-                self.shared.info("Physical display re-connected, removing virtual display...");
-                if display::remove_virtual_display() {
-                    self.virtual_display_created = false;
-                    self.virtual_display_info = None;
-                    self.shared.info("Virtual display removed");
+            } else if last_count == 0 && current_displays > 0 && (self.virtual_display_created || matches!(self.pending_virtual_display_action, Some((true, _)))) {
+                if debounce_dur.is_zero() {
+                    self.pending_virtual_display_action = None;
+                    if self.virtual_display_created {
+                        self.shared.info("Physical display re-connected, removing virtual display...");
+                        if display::remove_virtual_display() {
+                            self.virtual_display_created = false;
+                            self.virtual_display_info = None;
+                            self.shared.info("Virtual display removed");
+                        }
+                    }
+                } else {
+                    self.shared.info(format!(
+                        "Physical display re-connected; debouncing virtual display removal for {}s...",
+                        config.virtual_display.debounce_secs
+                    ));
+                    self.pending_virtual_display_action = Some((false, now + debounce_dur));
                 }
             }
         }
+
+        // Evaluate any pending debounced action
+        if let Some((should_create, due_time)) = self.pending_virtual_display_action {
+            if should_create {
+                if current_displays > 0 {
+                    // Displays came back before debounce expired; cancel creation
+                    self.shared.info("Physical display reappeared before debounce elapsed; cancelled virtual display creation");
+                    self.pending_virtual_display_action = None;
+                } else if now >= due_time {
+                    self.pending_virtual_display_action = None;
+                    if !self.virtual_display_created && config.virtual_display.create_on_last_display_unplugged {
+                        self.shared.warn("Debounce elapsed; creating virtual display...");
+                        let res = config.virtual_display.resolution.clone();
+                        if let Some(info) = display::create_virtual_display(&res) {
+                            self.virtual_display_created = true;
+                            self.virtual_display_info = Some(info.clone());
+                            self.shared.info(format!("Virtual display {info} created on display disconnect"));
+                        }
+                    }
+                }
+            } else {
+                if current_displays == 0 {
+                    // Displays disappeared again before debounce expired; cancel removal
+                    self.shared.info("Physical display disconnected before debounce elapsed; keeping virtual display");
+                    self.pending_virtual_display_action = None;
+                } else if now >= due_time {
+                    self.pending_virtual_display_action = None;
+                    if self.virtual_display_created {
+                        self.shared.info("Debounce elapsed; removing virtual display...");
+                        if display::remove_virtual_display() {
+                            self.virtual_display_created = false;
+                            self.virtual_display_info = None;
+                            self.shared.info("Virtual display removed");
+                        }
+                    }
+                }
+            }
+        }
+
         self.last_display_count = Some(current_displays);
 
         let status = Status {

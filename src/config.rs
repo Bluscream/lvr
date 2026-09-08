@@ -380,8 +380,10 @@ pub struct VirtualDisplayConfig {
     pub create_on_startup: bool,
     /// Create a virtual display when the last remaining physical display is unplugged.
     pub create_on_last_display_unplugged: bool,
-    /// Virtual display resolution mode (default: "3840x2160@60").
+    /// Virtual display resolution mode (default: "3840x2160@120").
     pub resolution: String,
+    /// Debounce delay in seconds before creating or removing virtual display on display hotplug/unplug.
+    pub debounce_secs: u64,
 }
 
 impl Default for VirtualDisplayConfig {
@@ -390,6 +392,7 @@ impl Default for VirtualDisplayConfig {
             create_on_startup: true,
             create_on_last_display_unplugged: true,
             resolution: "3840x2160@120".into(),
+            debounce_secs: 3,
         }
     }
 }
@@ -488,6 +491,7 @@ impl Config {
         self.general.relaunch_debounce_secs = self.general.relaunch_debounce_secs.clamp(1, 3600);
         self.general.stop_grace_secs = self.general.stop_grace_secs.clamp(1, 300);
         self.wivrn.restart_delay_secs = self.wivrn.restart_delay_secs.clamp(1, 3600);
+        self.virtual_display.debounce_secs = self.virtual_display.debounce_secs.clamp(0, 60);
         self.steam.shutdown_timeout_secs = self.steam.shutdown_timeout_secs.clamp(5, 300);
         self.steam.profiles.retain(|p| !p.name.trim().is_empty());
         self.general.vrchat_match = self
@@ -576,7 +580,8 @@ fn default_entries() -> Vec<AutostartEntry> {
             // Matches both the launcher script and the Wine-side executable,
             // without matching every path that merely mentions VRCOSC.
             match_patterns: vec![
-                "VRCOSC.dll".into(),
+                "vrcosc.dll".into(),
+                "vrcosc.app.dll".into(),
                 "vrcosc.exe".into(),
                 "/.local/bin/vrcosc".into(),
             ],
@@ -727,10 +732,12 @@ mod tests {
         let mut config = Config::default();
         config.general.ui_scale = 99.0;
         config.general.poll_interval_ms = 1;
+        config.virtual_display.debounce_secs = 999;
         config.general.vrchat_match = vec!["  ".into()];
         config.normalize();
         assert_eq!(config.general.ui_scale, 4.0);
         assert_eq!(config.general.poll_interval_ms, 200);
+        assert_eq!(config.virtual_display.debounce_secs, 60);
         assert_eq!(config.general.vrchat_match, vec!["vrchat.exe".to_string()]);
     }
 
