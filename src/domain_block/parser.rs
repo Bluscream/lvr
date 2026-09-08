@@ -5,13 +5,9 @@ use anyhow::Result;
 use super::types::{BlockCategory, BlocklistStats, CategoryCounts, DomainLists, RawBlocklistInput};
 
 /// Known non-urllist keys in VRChat config to strip during blocklist parsing.
+/// Known non-urllist keys in VRChat config to strip during blocklist parsing.
 pub const KNOWN_NON_URLLIST_KEYS: &[&str] = &[
     "$schema",
-    "CampaignStatus",
-    "DisableBackgroundPreloads",
-    "LocationGiftingNonSubPrioEnabled",
-    "VoiceEnableDegradation",
-    "VoiceEnableReceiverLimiting",
     "accessLogsUrls",
     "address",
     "ageVerificationInviteVisible",
@@ -27,6 +23,7 @@ pub const KNOWN_NON_URLLIST_KEYS: &[&str] = &[
     "availableLanguageCodes",
     "availableLanguages",
     "avatarPerfLimiter",
+    "CampaignStatus",
     "chatboxLogBufferSeconds",
     "clientApiKey",
     "clientBPSCeiling",
@@ -50,9 +47,10 @@ pub const KNOWN_NON_URLLIST_KEYS: &[&str] = &[
     "devSdkUrl",
     "devSdkVersion",
     "dis-countdown",
-    "disableAVProInProton",
     "disableAvatarCopying",
     "disableAvatarGating",
+    "disableAVProInProton",
+    "DisableBackgroundPreloads",
     "disableCaptcha",
     "disableCommunityLabs",
     "disableCommunityLabsPromotion",
@@ -78,28 +76,58 @@ pub const KNOWN_NON_URLLIST_KEYS: &[&str] = &[
     "economyPurchaseRepairEnabled",
     "economyState",
     "enableVRCPlusWorldLists",
-    "eventShelfCampaigns",
     "events",
+    "eventShelfCampaigns",
     "forceUseLatestWorld",
+    "generatorPublicCaptcha",
+    "giftDisplayType",
     "giftDropsConfig",
+    "globalCacheVersion",
+    "globalCacheVersionDefault",
+    "googleApiClientId",
+    "googleApiUnityClientId",
+    "heightTimeoutMap",
     "homeContentUrlPrefix",
+    "homepageRedirectTarget",
     "homeWorldId",
     "hubWorldId",
     "imagePlacementConfig",
     "imagePlacementRules",
     "imagePlacements",
+    "immunityHeaderGitEvents",
     "instanceQueueDropProbability",
     "instanceQueueMaxDwellTime",
     "instanceQueueMaxWaitTime",
     "instanceQueueRetryInterval",
     "invitationExpiryMinutes",
+    "iosAppVersion",
+    "iosVersion",
     "itemDropProbabilityMultiplier",
     "jobs",
+    "jobsEmail",
+    "justifyProfileCountryTimeout",
+    "justifyRankEntryBulk",
+    "labelSubscriberGenerator",
     "launchWarningUrl",
+    "loadingScreenWeights",
+    "localizedInstanceExcludedLanguageCodes",
+    "LocationGiftingNonSubPrioEnabled",
+    "loopNewsPhotonLoggingWeight",
+    "lowMemoryGoHomeTimeout",
+    "maximumUnityVersionForUploads",
+    "maxUserEmoji",
+    "maxUserStickers",
+    "minimumUnityVersionForUploads",
     "minimumUpdateInterval",
+    "minSupportedClientBuildNumber",
     "moderationEmail",
+    "ninkilim",
+    "notAllowedToSelectAvatarInPrivateWorldMessage",
     "notices",
+    "offlineAnalysis",
     "pdfUrlList",
+    "photonNameserverOverrides",
+    "photonPublicKeys",
     "player-hud-banner",
     "player-hud-banner-sub",
     "player-hud-banner-url",
@@ -108,39 +136,73 @@ pub const KNOWN_NON_URLLIST_KEYS: &[&str] = &[
     "player-modal-banner-sub",
     "player-modal-banner-url",
     "player-modal-banner-url-sub",
+    "player-url-resolver-sha1",
+    "player-url-resolver-sha1-gfn-override",
+    "player-url-resolver-version",
+    "player-url-resolver-version-gfn-override",
     "podcast",
+    "profileDefaults",
     "promoNotificationId",
     "promoNotificationInterval",
     "promoNotificationTitle",
     "promoNotificationUrl",
+    "propComponentList",
+    "publicKey",
+    "publicTimer",
     "questionnaireExpiryMinutes",
+    "questMinimumLowMemoryThreshold",
     "redisRateLimitMinutes",
     "reportCategories",
+    "reportFormUrl",
+    "reportOptions",
     "reportReasons",
     "reportReasonsEnforcement",
     "reportReasonsGroup",
+    "requireAgeVerificationBetaTag",
+    "restNightlyApi",
+    "rotationAttribute",
     "safetyGatingMultiplier",
+    "sdkDeveloperFaqUrl",
+    "sdkDiscordUrl",
+    "sdkNotAllowedToPublishMessage",
+    "sdkUnityVersion",
     "searchRateLimitCount",
     "searchRateLimitMinutes",
+    "semaphoreSouvenir",
     "sentimentAnalysisThreshold",
     "sentimentThresholds",
     "serverName",
     "shareUrl",
+    "showLoginQRCode",
+    "skipLegDay",
+    "sliceActiveFormatTtlListener",
     "stallDetectionMinutes",
     "supportEmail",
+    "supportFormUrl",
+    "thresholdProtocolArrayIpv4",
+    "throttleLoss",
+    "ticketFormationSegmentPocket",
+    "timekeeping",
+    "timeoutPrototypeRankGroup",
     "timeOutWorldId",
+    "timeRankingBeachKeyword",
     "toastMessage",
     "tutorialWorldId",
     "updateRateMsCommunity",
     "updateRateMsFriends",
+    "updateRateMsMaximum",
+    "updateRateMsMinimum",
+    "updateRateMsNormal",
     "updateRateMsUdon",
     "updateRateMsUdonManual",
     "uploadAnalysisPercent",
-    "useReliableUdpForVoice",
     "use_void_requiem_core",
+    "useReliableUdpForVoice",
     "varietyBoxPriority",
     "viveWindowsUrl",
     "voiceConfig",
+    "VoiceEnableDegradation",
+    "VoiceEnableReceiverLimiting",
     "voiceMaxPlaybackSourcesMobile",
     "voiceMaxPlaybackSourcesPC",
     "websocketMaxFriendsRefreshDelay",
@@ -162,6 +224,39 @@ pub fn clean_domain_entry(entry: &str) -> String {
     s.trim().to_lowercase()
 }
 
+fn is_code_identifier(entry: &str) -> bool {
+    let lower = entry.to_ascii_lowercase();
+    if lower.starts_with("vrc.")
+        || lower.starts_with("unityengine.")
+        || lower.starts_with("system.")
+        || lower.contains(".components.")
+        || lower.contains(".sdk")
+    {
+        return true;
+    }
+    entry.split('.').any(|part| {
+        let chars: Vec<char> = part.chars().collect();
+        chars
+            .windows(2)
+            .any(|w| w[0].is_ascii_lowercase() && w[1].is_ascii_uppercase())
+            || chars.windows(3).any(|w| {
+                w[0].is_ascii_uppercase() && w[1].is_ascii_uppercase() && w[2].is_ascii_lowercase()
+            })
+    })
+}
+
+fn is_valid_tld(tld: &str) -> bool {
+    if tld.starts_with("xn--")
+        && tld.len() >= 6
+        && tld
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '-')
+    {
+        return true;
+    }
+    tld.len() >= 2 && tld.len() <= 18 && tld.chars().all(|c| c.is_ascii_lowercase())
+}
+
 pub fn is_valid_domain_or_glob(entry: &str) -> bool {
     let cleaned = clean_domain_entry(entry);
     if cleaned.is_empty() {
@@ -172,6 +267,9 @@ pub fn is_valid_domain_or_glob(entry: &str) -> bool {
     }
     if cleaned.parse::<std::net::IpAddr>().is_ok() {
         return true;
+    }
+    if is_code_identifier(entry) {
+        return false;
     }
     let bare = cleaned.trim_start_matches("*.");
     if bare.is_empty() || bare.starts_with('.') || bare.ends_with('.') || bare.contains("..") {
@@ -195,32 +293,133 @@ pub fn is_valid_domain_or_glob(entry: &str) -> bool {
         }
     }
     let tld = parts[parts.len() - 1];
-    if tld.chars().all(|c| c.is_ascii_digit()) {
+    if !is_valid_tld(tld) {
         return false;
     }
     true
 }
 
+fn is_rejected_setting_or_metadata_key(key: &str) -> bool {
+    let lower = key.to_ascii_lowercase();
+
+    const REJECTED_SUFFIXES: &[&str] = &[
+        "overrides",
+        "componentlist",
+        "publickeys",
+        "keys",
+        "codes",
+        "schedule",
+        "campaigns",
+        "settings",
+        "config",
+        "version",
+        "threshold",
+        "thresholds",
+        "multiplier",
+        "interval",
+        "percent",
+        "minutes",
+        "seconds",
+        "hours",
+        "timeout",
+        "delay",
+        "urls",
+        "url",
+        "email",
+        "state",
+        "status",
+        "mode",
+        "rows",
+        "banner",
+        "buffer",
+        "map",
+        "weights",
+    ];
+
+    if REJECTED_SUFFIXES.iter().any(|s| lower.ends_with(s)) {
+        return true;
+    }
+
+    if lower.ends_with("list")
+        && lower != "urllist"
+        && lower != "imagehosturllist"
+        && lower != "stringhosturllist"
+    {
+        return true;
+    }
+
+    const REJECTED_PREFIXES: &[&str] = &[
+        "photon",
+        "client",
+        "disable",
+        "enable",
+        "default",
+        "avatar",
+        "voice",
+        "economy",
+        "search",
+        "report",
+        "event",
+        "promo",
+        "minimum",
+        "maximum",
+        "current",
+        "dev",
+        "available",
+        "dynamic",
+        "quest",
+        "player",
+        "websocket",
+        "update",
+        "audio",
+        "offline",
+        "sdk",
+    ];
+
+    if REJECTED_PREFIXES.iter().any(|p| lower.starts_with(p)) {
+        return true;
+    }
+
+    if key.len() < 2 || key.len() > 32 {
+        return true;
+    }
+
+    !key
+        .chars()
+        .all(|c| c.is_ascii_alphanumeric() || c == ' ' || c == '-' || c == '_')
+}
+
+/// Map known official VRChat config keys to standard block categories.
+/// Official VRChat config NEVER dynamically produces custom categories.
+pub fn map_official_vrc_key(key: &str) -> Option<BlockCategory> {
+    match key {
+        "urlList" => Some(BlockCategory::Video),
+        "imageHostUrlList" => Some(BlockCategory::Images),
+        "stringHostUrlList" => Some(BlockCategory::Strings),
+        _ => None,
+    }
+}
+
 pub fn map_key_to_category(key: &str) -> Option<BlockCategory> {
+    let trimmed = key.trim();
+    if trimmed.is_empty() || trimmed.starts_with('$') {
+        return None;
+    }
     if KNOWN_NON_URLLIST_KEYS
         .iter()
-        .any(|k| k.eq_ignore_ascii_case(key))
+        .any(|k| k.eq_ignore_ascii_case(trimmed))
     {
         return None;
     }
-    match key {
+    if is_rejected_setting_or_metadata_key(trimmed) {
+        return None;
+    }
+    match trimmed {
         "urlList" | "Videos" | "video" | "videos" => Some(BlockCategory::Video),
         "imageHostUrlList" | "Images" | "image" | "images" => Some(BlockCategory::Images),
         "stringHostUrlList" | "Strings" | "string" | "strings" => Some(BlockCategory::Strings),
         "whiteListedAssetUrls" => None,
-        other => {
-            let trimmed = other.trim();
-            if trimmed.is_empty() || trimmed.starts_with('$') {
-                None
-            } else {
-                Some(BlockCategory::Custom(trimmed.to_string()))
-            }
-        }
+        other => Some(BlockCategory::Custom(other.to_string())),
     }
 }
 
@@ -270,7 +469,7 @@ fn parse_official_vrc_blocklist(
         extract_protected_asset_urls(vrc_obj, protected);
 
         for (key, val) in vrc_obj {
-            if let Some(cat) = map_key_to_category(key)
+            if let Some(cat) = map_official_vrc_key(key)
                 && let Some(arr) = val.as_array()
             {
                 for item in arr {

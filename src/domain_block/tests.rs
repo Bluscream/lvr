@@ -388,11 +388,67 @@ fn custom_category_expansion_and_non_urllist_key_stripping() {
 #[test]
 fn local_community_json_loads_analytics_category() {
     let lists = build_domain_lists_fallback_with_community(true);
-    assert!(lists.custom_categories.contains(&"Analytics".to_string()));
+    assert_eq!(lists.custom_categories, vec!["Analytics".to_string()]);
+    assert!(!lists
+        .custom_categories
+        .contains(&"photonNameserverOverrides".to_string()));
+    assert!(!lists
+        .custom_categories
+        .contains(&"propComponentList".to_string()));
     let analytics_domains =
         lists.domains_for_category(&BlockCategory::Custom("Analytics".to_string()));
     assert!(analytics_domains.contains(&"api.amplitude.com".to_string()));
     assert!(analytics_domains.len() >= 100);
+
+    let official_stats = lists
+        .list_stats
+        .iter()
+        .find(|s| s.name == "Official")
+        .expect("Official stats");
+    assert_eq!(
+        official_stats
+            .counts
+            .custom
+            .get("photonNameserverOverrides"),
+        None
+    );
+    assert_eq!(official_stats.counts.custom.get("propComponentList"), None);
+}
+
+#[test]
+fn official_vrc_config_never_produces_custom_categories() {
+    let vrc_json = r#"{
+        "urlList": ["youtube.com"],
+        "imageHostUrlList": ["imgur.com"],
+        "stringHostUrlList": ["pastebin.com"],
+        "photonNameserverOverrides": ["ns.photonengine.io"],
+        "propComponentList": ["VRC.SDK3.Components.VRCMirrorReflection"],
+        "newFutureArrayAddedByVrc": ["unexpected.vrchat.com", "other.domain.com"],
+        "anotherKey": ["test.org"]
+    }"#;
+    let lists = parse_all_domain_lists(vrc_json, &[]).expect("parse official vrc");
+    assert!(
+        lists.custom_categories.is_empty(),
+        "Official config must NEVER create custom categories, got: {:?}",
+        lists.custom_categories
+    );
+}
+
+#[test]
+fn domain_validation_rejects_csharp_types_and_code_identifiers() {
+    assert!(!is_valid_domain_or_glob(
+        "VRC.SDK3.Components.VRCMirrorReflection"
+    ));
+    assert!(!is_valid_domain_or_glob(
+        "UnityEngine.Networking.UnityWebRequest"
+    ));
+    assert!(!is_valid_domain_or_glob("System.Collections.Generic.List"));
+    assert!(!is_valid_domain_or_glob(
+        "vrc.sdk3.components.vrcmirrorreflection"
+    ));
+    assert!(is_valid_domain_or_glob("ns.photonengine.io"));
+    assert!(is_valid_domain_or_glob("api.amplitude.com"));
+    assert!(is_valid_domain_or_glob("*.vrchat.cloud"));
 }
 
 #[test]
