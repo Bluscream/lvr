@@ -1,4 +1,5 @@
 /target
 /todo.md
 .references/
-!assets/lists/config.json
+!assets/lists/config.jsontests/dns_test/bin
+tests/dns_test/obj

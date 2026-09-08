@@ -1,2 +1,0 @@
-/run/host/run/media/system/Data/Projects/lvr/tests/dns_test/bin/Release/net8.0/win-x64/publish/dns_test.pdb
-/run/host/run/media/system/Data/Projects/lvr/tests/dns_test/bin/Release/net8.0/win-x64/publish/dns_test.exe
