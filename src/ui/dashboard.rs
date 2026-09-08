@@ -142,15 +142,25 @@ fn render_domain_shields(app: &mut LvrApp, ui: &mut Ui) {
     ui.horizontal_wrapped(|ui| {
         for category in categories {
             let is_blocked = app.status.block_state.is_blocked(&category);
+            let count = lists.count_for_category(&category);
             let tint = if is_blocked { RED } else { GREEN };
-            let display_name = category.label();
+            let status_sub = if is_blocked { "BLOCKED" } else { "ALLOWED" };
+            let display_name = format!("{}\n{} ({})", category.label(), status_sub, count);
 
-            let button = egui::Button::new(RichText::new(display_name).size(14.0).strong())
+            let button = egui::Button::new(RichText::new(display_name).size(13.0).strong())
                 .corner_radius(egui::CornerRadius::same(10))
                 .fill(tint.gamma_multiply(0.20))
                 .stroke((1.5, tint));
 
-            if ui.add_sized(egui::Vec2::new(button_w, BIG_BUTTON_HEIGHT), button).clicked() {
+            let tooltip = if is_blocked {
+                format!("{} is currently BLOCKED ({} domains). Click to ALLOW.", category.label(), count)
+            } else {
+                format!("{} is currently ALLOWED. Click to BLOCK ({} domains).", category.label(), count)
+            };
+
+            if ui.add_sized(egui::Vec2::new(button_w, BIG_BUTTON_HEIGHT), button).on_hover_text(tooltip).clicked() {
+                // Optimistically update local UI state immediately
+                app.status.block_state.set_blocked(&category, !is_blocked);
                 app.send(Command::ToggleBlockCategory(category));
             }
         }

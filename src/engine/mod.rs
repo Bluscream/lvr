@@ -165,6 +165,7 @@ impl Engine {
             Command::ToggleBlockCategory(category) => {
                 let current = self.block_state.is_blocked(&category);
                 self.set_block_category(category, !current).await;
+                self.tick().await;
             }
             Command::ReloadDomainLists => {
                 let domain_cfg = self.shared.config().domain_block.clone();
