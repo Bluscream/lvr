@@ -162,6 +162,7 @@ pub struct DomainLists {
     pub list_stats: Vec<BlocklistStats>,
     pub total_counts: CategoryCounts,
     pub custom_categories: Vec<String>,
+    pub domain_sources: BTreeMap<String, Vec<String>>,
 }
 
 impl DomainLists {
@@ -191,6 +192,14 @@ impl DomainLists {
                 .map(|(_, v)| v.as_slice())
                 .unwrap_or(&[]),
         }
+    }
+
+    pub fn sources_for_domain(&self, domain: &str) -> &[String] {
+        let key = crate::domain_block::canonical_domain_key(domain);
+        self.domain_sources
+            .get(&key)
+            .map(|v| v.as_slice())
+            .unwrap_or(&[])
     }
 }
 

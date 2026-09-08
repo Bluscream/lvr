@@ -7,7 +7,7 @@ use std::path::{Path, PathBuf};
 use anyhow::Result;
 
 use super::cache::active_domains;
-use super::types::{BlockCategory, BlockState};
+use super::types::{BlockCategory, BlockState, DomainLists};
 
 /// Resolve the VRChat Proton prefix directory.
 pub fn detect_vrc_prefix(configured_prefix: &str) -> Option<PathBuf> {
@@ -97,23 +97,11 @@ pub fn sync_all(prefix: &Path, state: &BlockState) -> Result<()> {
     Ok(())
 }
 
-fn update_hosts_file(prefix: &Path, state: &BlockState) -> Result<()> {
-    let hosts_path = prefix_hosts_path(prefix);
-    if let Some(parent) = hosts_path.parent() {
-        fs::create_dir_all(parent)?;
-    }
-
-    let existing = if hosts_path.is_file() {
-        fs::read_to_string(&hosts_path).unwrap_or_default()
-    } else {
-        String::new()
-    };
-
-    // Remove any existing LVR blocks
+fn strip_existing_lvr_blocks(content: &str) -> Vec<&str> {
     let mut cleaned = Vec::new();
     let mut inside_lvr_block = false;
 
-    for line in existing.lines() {
+    for line in content.lines() {
         let trimmed = line.trim();
         if trimmed.starts_with("# ----- BEGIN LVR ") && trimmed.ends_with(" BLOCK -----") {
             inside_lvr_block = true;
@@ -127,6 +115,66 @@ fn update_hosts_file(prefix: &Path, state: &BlockState) -> Result<()> {
         }
         cleaned.push(line);
     }
+    cleaned
+}
+
+fn build_category_hosts_lines(
+    lists: &DomainLists,
+    cat: &BlockCategory,
+    emitted_hosts: &mut HashSet<String>,
+) -> Vec<String> {
+    let mut category_lines = Vec::new();
+
+    for domain in lists.domains_for_category(cat) {
+        let bare = domain.trim_start_matches("*.");
+        if bare.is_empty() || bare == "localhost" || bare.parse::<std::net::IpAddr>().is_ok() {
+            continue;
+        }
+
+        let (base, www) = if let Some(stripped) = bare.strip_prefix("www.") {
+            (stripped, bare)
+        } else {
+            (bare, "")
+        };
+
+        let sources = lists.sources_for_domain(base);
+        let comment = if sources.is_empty() {
+            String::new()
+        } else {
+            format!(" # {}", sources.join(", "))
+        };
+
+        let base_lower = base.to_lowercase();
+        if emitted_hosts.insert(base_lower.clone()) {
+            category_lines.push(format!("0.0.0.0 {base_lower}{comment}"));
+        }
+
+        let www_lower = if www.is_empty() {
+            format!("www.{base_lower}")
+        } else {
+            www.to_lowercase()
+        };
+        if emitted_hosts.insert(www_lower.clone()) {
+            category_lines.push(format!("0.0.0.0 {www_lower}{comment}"));
+        }
+    }
+
+    category_lines
+}
+
+fn update_hosts_file(prefix: &Path, state: &BlockState) -> Result<()> {
+    let hosts_path = prefix_hosts_path(prefix);
+    if let Some(parent) = hosts_path.parent() {
+        fs::create_dir_all(parent)?;
+    }
+
+    let existing = if hosts_path.is_file() {
+        fs::read_to_string(&hosts_path).unwrap_or_default()
+    } else {
+        String::new()
+    };
+
+    let cleaned = strip_existing_lvr_blocks(&existing);
 
     let mut result = cleaned.join("\n");
     if !result.is_empty() && !result.ends_with('\n') {
@@ -139,8 +187,9 @@ fn update_hosts_file(prefix: &Path, state: &BlockState) -> Result<()> {
     // Track existing non-LVR blocked hosts so we don't duplicate them either
     for line in &cleaned {
         let trimmed = line.trim();
-        if trimmed.starts_with("0.0.0.0 ") || trimmed.starts_with("127.0.0.1 ") {
-            for part in trimmed.split_whitespace().skip(1) {
+        let without_comment = trimmed.split('#').next().unwrap_or("").trim();
+        if without_comment.starts_with("0.0.0.0 ") || without_comment.starts_with("127.0.0.1 ") {
+            for part in without_comment.split_whitespace().skip(1) {
                 emitted_hosts.insert(part.to_lowercase());
             }
         }
@@ -150,42 +199,7 @@ fn update_hosts_file(prefix: &Path, state: &BlockState) -> Result<()> {
     let lists = active_domains();
     for cat in lists.all_categories() {
         if state.is_blocked(&cat) {
-            let mut category_lines = Vec::new();
-
-            for domain in lists.domains_for_category(&cat) {
-                let bare = domain.trim_start_matches("*.");
-                if bare.is_empty() || bare == "localhost" {
-                    continue;
-                }
-                // Skip raw IP addresses in hosts file domain entries
-                if bare.parse::<std::net::IpAddr>().is_ok() {
-                    continue;
-                }
-
-                // Determine both base domain and www equivalent
-                let (base, www) = if let Some(stripped) = bare.strip_prefix("www.") {
-                    (stripped, bare)
-                } else {
-                    (bare, "")
-                };
-
-                // Emit base domain
-                let base_lower = base.to_lowercase();
-                if emitted_hosts.insert(base_lower.clone()) {
-                    category_lines.push(format!("0.0.0.0 {base_lower}"));
-                }
-
-                // Always emit www equivalent as well, whether source had *. or not
-                let www_lower = if www.is_empty() {
-                    format!("www.{base_lower}")
-                } else {
-                    www.to_lowercase()
-                };
-                if emitted_hosts.insert(www_lower.clone()) {
-                    category_lines.push(format!("0.0.0.0 {www_lower}"));
-                }
-            }
-
+            let category_lines = build_category_hosts_lines(&lists, &cat, &mut emitted_hosts);
             if !category_lines.is_empty() {
                 result.push_str(&cat.header_tag());
                 result.push('\n');

@@ -741,9 +741,42 @@ fn count_map_categories(
     counts
 }
 
+fn compute_domain_sources(
+    official_domains_by_cat: &BTreeMap<BlockCategory, HashSet<String>>,
+    comm_data: &[CommData],
+) -> BTreeMap<String, Vec<String>> {
+    let mut domain_sources: BTreeMap<String, Vec<String>> = BTreeMap::new();
+
+    for set in official_domains_by_cat.values() {
+        for d in set {
+            let key = canonical_domain_key(d);
+            let sources = domain_sources.entry(key).or_default();
+            if !sources.iter().any(|s| s == "Official") {
+                sources.push("Official".to_string());
+            }
+        }
+    }
+
+    for comm in comm_data {
+        if comm.enabled {
+            for set in comm.domains_by_cat.values() {
+                for d in set {
+                    let key = canonical_domain_key(d);
+                    let sources = domain_sources.entry(key).or_default();
+                    if !sources.iter().any(|s| s == &comm.name) {
+                        sources.push(comm.name.clone());
+                    }
+                }
+            }
+        }
+    }
+
+    domain_sources
+}
+
 fn compute_list_stats(
     official_domains_by_cat: &BTreeMap<BlockCategory, HashSet<String>>,
-    comm_data: Vec<CommData>,
+    comm_data: &[CommData],
     classified: &ClassifiedDomains,
 ) -> (Vec<BlocklistStats>, CategoryCounts) {
     let v_set: HashSet<&str> = classified
@@ -796,13 +829,13 @@ fn compute_list_stats(
                 &custom_sets,
             );
             list_stats.push(BlocklistStats {
-                name: comm.name,
+                name: comm.name.clone(),
                 counts,
                 enabled: true,
             });
         } else {
             list_stats.push(BlocklistStats {
-                name: comm.name,
+                name: comm.name.clone(),
                 counts: CategoryCounts::default(),
                 enabled: false,
             });
@@ -846,8 +879,9 @@ pub fn parse_all_domain_lists(
     #[cfg(test)]
     protected_list.sort();
 
+    let domain_sources = compute_domain_sources(&official_domains_by_cat, &comm_data);
     let (list_stats, total_counts) =
-        compute_list_stats(&official_domains_by_cat, comm_data, &classified);
+        compute_list_stats(&official_domains_by_cat, &comm_data, &classified);
 
     Ok(DomainLists {
         video_domains: classified.video_domains,
@@ -860,5 +894,6 @@ pub fn parse_all_domain_lists(
         list_stats,
         total_counts,
         custom_categories: classified.custom_categories,
+        domain_sources,
     })
 }

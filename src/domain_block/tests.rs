@@ -483,14 +483,29 @@ fn hosts_file_has_zero_duplicates_and_always_blocks_www_equivalent() {
             current_cat = "NONE";
             continue;
         }
-        if let Some(host) = trimmed.strip_prefix("0.0.0.0 ") {
-            let host = host.trim().to_lowercase();
-            assert!(
-                seen.insert(host.clone()),
-                "Duplicate host found in hosts file: {host}"
+        if trimmed.starts_with("0.0.0.0 ") {
+            let parts: Vec<&str> = trimmed.split('#').collect();
+            assert_eq!(
+                parts.len(),
+                2,
+                "Every hosts entry must have a # comment showing its source list: {trimmed}"
             );
-            if let Some(prev_cat) = category_by_host.insert(host.clone(), current_cat) {
-                panic!("Host {host} was emitted in both {prev_cat} and {current_cat}!");
+            let comment = parts[1].trim();
+            assert!(
+                comment.contains("Official") || comment.contains("Community"),
+                "Comment '{comment}' does not contain expected list name in {trimmed}"
+            );
+
+            let without_comment = parts[0].trim();
+            if let Some(host) = without_comment.strip_prefix("0.0.0.0 ") {
+                let host = host.trim().to_lowercase();
+                assert!(
+                    seen.insert(host.clone()),
+                    "Duplicate host found in hosts file: {host}"
+                );
+                if let Some(prev_cat) = category_by_host.insert(host.clone(), current_cat) {
+                    panic!("Host {host} was emitted in both {prev_cat} and {current_cat}!");
+                }
             }
         }
     }
@@ -535,6 +550,17 @@ fn all_categories_are_mutually_exclusive_by_canonical_key() {
             }
         }
     }
+}
+
+#[test]
+fn domain_sources_tracking_records_originating_lists() {
+    let lists = build_domain_lists_fallback_with_community(true);
+    let yt_sources = lists.sources_for_domain("youtube.com");
+    assert!(yt_sources.contains(&"Official".to_string()));
+    assert!(yt_sources.contains(&"Community".to_string()));
+
+    let amp_sources = lists.sources_for_domain("api.amplitude.com");
+    assert_eq!(amp_sources, &["Community".to_string()]);
 }
 
 #[test]
