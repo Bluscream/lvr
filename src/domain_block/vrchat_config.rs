@@ -105,7 +105,7 @@ fn is_protected(domain: &str, protected_set: &HashSet<String>) -> bool {
 }
 
 /// Parses the VRChat configuration JSON string (official or fallback) into categorized domain lists:
-/// - Video: from `urlList`
+/// - Videos: from `urlList`
 /// - Images: from `imageHostUrlList`
 /// - Strings: from `stringHostUrlList`
 /// - Shared: Any domain appearing in >1 category
