@@ -144,8 +144,7 @@ fn render_domain_shields(app: &mut LvrApp, ui: &mut Ui) {
             let is_blocked = app.status.block_state.is_blocked(&category);
             let count = lists.count_for_category(&category);
             let tint = if is_blocked { RED } else { GREEN };
-            let status_sub = if is_blocked { "BLOCKED" } else { "ALLOWED" };
-            let display_name = format!("{}\n{} ({})", category.label(), status_sub, count);
+            let display_name = format!("{}\n({})", category.label(), count);
 
             let button = egui::Button::new(RichText::new(display_name).size(13.0).strong())
                 .corner_radius(egui::CornerRadius::same(10))
