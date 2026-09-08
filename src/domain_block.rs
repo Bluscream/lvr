@@ -19,15 +19,16 @@ use anyhow::Result;
 use serde::{Deserialize, Serialize};
 
 /// The categories of network/media content that can be blocked in VRChat.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
 pub enum BlockCategory {
     Video,
     Images,
     Strings,
+    Custom(String),
     Rest,
 }
 
-use std::collections::HashSet;
+use std::collections::{BTreeMap, HashSet};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, RwLock};
 
@@ -36,22 +37,60 @@ use std::sync::{Arc, RwLock};
 const EMBEDDED_FALLBACK_CONFIG: &str = include_str!("../assets/vrchat_config_fallback.json");
 
 /// Detailed domain counts per category.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CategoryCounts {
     pub video: usize,
     pub image: usize,
     pub string: usize,
+    #[serde(default)]
+    pub custom: BTreeMap<String, usize>,
     pub rest: usize,
 }
 
 impl CategoryCounts {
     pub fn total(&self) -> usize {
-        self.video + self.image + self.string + self.rest
+        self.video + self.image + self.string + self.custom.values().sum::<usize>() + self.rest
+    }
+
+    pub fn for_category(&self, cat: &BlockCategory) -> usize {
+        match cat {
+            BlockCategory::Video => self.video,
+            BlockCategory::Images => self.image,
+            BlockCategory::Strings => self.string,
+            BlockCategory::Rest => self.rest,
+            BlockCategory::Custom(name) => self
+                .custom
+                .iter()
+                .find(|(k, _)| k.eq_ignore_ascii_case(name))
+                .map(|(_, &c)| c)
+                .unwrap_or(0),
+        }
+    }
+
+    pub fn set_for_category(&mut self, cat: &BlockCategory, count: usize) {
+        match cat {
+            BlockCategory::Video => self.video = count,
+            BlockCategory::Images => self.image = count,
+            BlockCategory::Strings => self.string = count,
+            BlockCategory::Rest => self.rest = count,
+            BlockCategory::Custom(name) => {
+                if let Some(existing_key) = self
+                    .custom
+                    .keys()
+                    .find(|k| k.eq_ignore_ascii_case(name))
+                    .cloned()
+                {
+                    self.custom.insert(existing_key, count);
+                } else {
+                    self.custom.insert(name.clone(), count);
+                }
+            }
+        }
     }
 }
 
 /// Statistics for a specific blocklist source (Official or Community).
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct BlocklistStats {
     pub name: String,
     pub counts: CategoryCounts,
@@ -72,11 +111,43 @@ pub struct DomainLists {
     pub video_domains: Vec<String>,
     pub image_domains: Vec<String>,
     pub string_domains: Vec<String>,
+    pub custom_domains: BTreeMap<String, Vec<String>>,
     pub rest_domains: Vec<String>,
     #[cfg(test)]
     pub protected_domains: Vec<String>,
     pub list_stats: Vec<BlocklistStats>,
     pub total_counts: CategoryCounts,
+    pub custom_categories: Vec<String>,
+}
+
+impl DomainLists {
+    pub fn all_categories(&self) -> Vec<BlockCategory> {
+        let mut cats = vec![
+            BlockCategory::Video,
+            BlockCategory::Images,
+            BlockCategory::Strings,
+        ];
+        for custom in &self.custom_categories {
+            cats.push(BlockCategory::Custom(custom.clone()));
+        }
+        cats.push(BlockCategory::Rest);
+        cats
+    }
+
+    pub fn domains_for_category(&self, cat: &BlockCategory) -> &[String] {
+        match cat {
+            BlockCategory::Video => &self.video_domains,
+            BlockCategory::Images => &self.image_domains,
+            BlockCategory::Strings => &self.string_domains,
+            BlockCategory::Rest => &self.rest_domains,
+            BlockCategory::Custom(name) => self
+                .custom_domains
+                .iter()
+                .find(|(k, _)| k.eq_ignore_ascii_case(name))
+                .map(|(_, v)| v.as_slice())
+                .unwrap_or(&[]),
+        }
+    }
 }
 
 static ACTIVE_DOMAIN_LISTS: RwLock<Option<Arc<DomainLists>>> = RwLock::new(None);
@@ -92,7 +163,7 @@ pub const COMMUNITY_CACHE_MAX_AGE: std::time::Duration = std::time::Duration::fr
 pub fn community_cache_path() -> PathBuf {
     directories::ProjectDirs::from("", "", "lvr")
         .map(|dirs| dirs.cache_dir().join("community_config.json"))
-        .unwrap_or_else(|| PathBuf::from("assets/lists/config.json"))
+        .unwrap_or_else(|| PathBuf::from("assets/lists/community.json"))
 }
 
 /// Primary file path where a specific community blocklist JSON is cached.
@@ -102,7 +173,7 @@ pub fn community_cache_path_for_id(id: &str) -> PathBuf {
     } else if let Some(dirs) = directories::ProjectDirs::from("", "", "lvr") {
         dirs.cache_dir().join(format!("community_{id}.json"))
     } else {
-        PathBuf::from(format!("assets/lists/config_{id}.json"))
+        PathBuf::from(format!("assets/lists/community_{id}.json"))
     }
 }
 
@@ -123,17 +194,19 @@ pub fn get_newest_local_community_file() -> Option<(PathBuf, std::time::Duration
     if let Some(dirs) = directories::ProjectDirs::from("", "", "lvr") {
         candidates.push(dirs.config_dir().join("community_config.json"));
     }
+    candidates.push(PathBuf::from("assets/lists/community.json"));
+    candidates.push(PathBuf::from("/run/media/system/Data/Projects/lvr/assets/lists/community.json"));
+    // Backwards compatibility fallback if older file still exists
     candidates.push(PathBuf::from("assets/lists/config.json"));
-    candidates.push(PathBuf::from("/run/media/system/Data/Projects/lvr/assets/lists/config.json"));
 
     let mut best: Option<(PathBuf, std::time::Duration, String)> = None;
 
     for path in &candidates {
-        if let Ok(meta) = fs::metadata(path) {
-            if let Ok(modified) = meta.modified() {
-                if let Ok(elapsed) = modified.elapsed() {
-                    if let Ok(content) = fs::read_to_string(path) {
-                        if !content.trim().is_empty() {
+        if let Ok(meta) = fs::metadata(path)
+            && let Ok(modified) = meta.modified()
+                && let Ok(elapsed) = modified.elapsed()
+                    && let Ok(content) = fs::read_to_string(path)
+                        && !content.trim().is_empty() {
                             match best {
                                 Some((_, best_elapsed, _)) if elapsed < best_elapsed => {
                                     best = Some((path.clone(), elapsed, content));
@@ -144,10 +217,6 @@ pub fn get_newest_local_community_file() -> Option<(PathBuf, std::time::Duration
                                 _ => {}
                             }
                         }
-                    }
-                }
-            }
-        }
     }
 
     best
@@ -155,8 +224,8 @@ pub fn get_newest_local_community_file() -> Option<(PathBuf, std::time::Duration
 
 /// Returns local community config content only if a local file exists and is less than 1 hour old.
 pub fn get_fresh_local_community_config() -> Option<String> {
-    if let Some((path, elapsed, content)) = get_newest_local_community_file() {
-        if elapsed < COMMUNITY_CACHE_MAX_AGE {
+    if let Some((path, elapsed, content)) = get_newest_local_community_file()
+        && elapsed < COMMUNITY_CACHE_MAX_AGE {
             tracing::debug!(
                 "Local community config at {} is fresh (age: {}s < 3600s), skipping redownload",
                 path.display(),
@@ -164,7 +233,6 @@ pub fn get_fresh_local_community_config() -> Option<String> {
             );
             return Some(content);
         }
-    }
     None
 }
 
@@ -176,13 +244,11 @@ pub fn get_fresh_local_community_config_for_source(
         return get_fresh_local_community_config();
     }
     let path = community_cache_path_for_id(&source.id);
-    if is_file_fresh(&path, COMMUNITY_CACHE_MAX_AGE) {
-        if let Ok(content) = fs::read_to_string(&path) {
-            if !content.trim().is_empty() {
+    if is_file_fresh(&path, COMMUNITY_CACHE_MAX_AGE)
+        && let Ok(content) = fs::read_to_string(&path)
+            && !content.trim().is_empty() {
                 return Some(content);
             }
-        }
-    }
     None
 }
 
@@ -230,17 +296,15 @@ pub async fn fetch_community_source(
         }
         Err(err) => {
             let cache_path = community_cache_path_for_id(&source.id);
-            if let Ok(stale) = fs::read_to_string(&cache_path) {
-                if !stale.trim().is_empty() {
+            if let Ok(stale) = fs::read_to_string(&cache_path)
+                && !stale.trim().is_empty() {
                     tracing::warn!("Failed to download '{}' ({err:#}); using stale cache", source.name);
                     return Ok(stale);
                 }
-            }
-            if source.id == "bluscream" || source.id == "default" {
-                if let Some((_, _, stale)) = get_newest_local_community_file() {
+            if (source.id == "bluscream" || source.id == "default")
+                && let Some((_, _, stale)) = get_newest_local_community_file() {
                     return Ok(stale);
                 }
-            }
             Err(err)
         }
     }
@@ -251,30 +315,26 @@ pub async fn fetch_community_source(
 /// Returns the community config JSON from memory cache, local disk cache, or repository file if present.
 /// Note: Community blocklist is NEVER embedded at compile-time.
 pub fn get_community_config_json() -> Option<String> {
-    if let Ok(guard) = LATEST_COMMUNITY_CONFIG_JSON.read() {
-        if let Some(ref json) = *guard {
-            if !json.trim().is_empty() {
+    if let Ok(guard) = LATEST_COMMUNITY_CONFIG_JSON.read()
+        && let Some(ref json) = *guard
+            && !json.trim().is_empty() {
                 return Some(json.clone());
             }
-        }
-    }
     get_newest_local_community_file().map(|(_, _, content)| content)
 }
 
 /// Returns the currently active domain lists, initializing from remote VRChat config or falling back to hardcoded.
 pub fn active_domains() -> Arc<DomainLists> {
-    if let Ok(guard) = ACTIVE_DOMAIN_LISTS.read() {
-        if let Some(lists) = guard.as_ref() {
+    if let Ok(guard) = ACTIVE_DOMAIN_LISTS.read()
+        && let Some(lists) = guard.as_ref() {
             return Arc::clone(lists);
         }
-    }
     let load_comm = LOAD_COMMUNITY_ENABLED.load(Ordering::Relaxed);
     let fallback = Arc::new(build_domain_lists_fallback_with_community(load_comm));
-    if let Ok(mut guard) = ACTIVE_DOMAIN_LISTS.write() {
-        if guard.is_none() {
+    if let Ok(mut guard) = ACTIVE_DOMAIN_LISTS.write()
+        && guard.is_none() {
             *guard = Some(Arc::clone(&fallback));
         }
-    }
     fallback
 }
 
@@ -319,11 +379,10 @@ pub async fn reload_domain_lists_with_config(
     if let Ok(mut guard) = LATEST_COMMUNITY_LISTS.write() {
         *guard = inputs.clone();
     }
-    if let Some(first) = inputs.iter().find(|i| i.enabled && !i.json.is_empty()) {
-        if let Ok(mut guard) = LATEST_COMMUNITY_CONFIG_JSON.write() {
+    if let Some(first) = inputs.iter().find(|i| i.enabled && !i.json.is_empty())
+        && let Ok(mut guard) = LATEST_COMMUNITY_CONFIG_JSON.write() {
             *guard = Some(first.json.clone());
         }
-    }
 
     let vrc_json = LATEST_VRC_CONFIG_JSON
         .read()
@@ -386,11 +445,10 @@ pub async fn init_from_remote_or_fallback_with_config(
     if let Ok(mut guard) = LATEST_COMMUNITY_LISTS.write() {
         *guard = inputs.clone();
     }
-    if let Some(first) = inputs.iter().find(|i| i.enabled && !i.json.is_empty()) {
-        if let Ok(mut guard) = LATEST_COMMUNITY_CONFIG_JSON.write() {
+    if let Some(first) = inputs.iter().find(|i| i.enabled && !i.json.is_empty())
+        && let Ok(mut guard) = LATEST_COMMUNITY_CONFIG_JSON.write() {
             *guard = Some(first.json.clone());
         }
-    }
 
     let lists = match fetch_remote_config().await {
         Ok(body) => {
@@ -463,8 +521,238 @@ async fn fetch_remote_config() -> Result<String> {
     Ok(response.text().await?)
 }
 
-/// Parse raw JSON from VRChat `/api/1/config` and partition domains strictly into pure video, image, string sets.
+/// Known non-urllist keys in VRChat config to strip during blocklist parsing.
+pub const KNOWN_NON_URLLIST_KEYS: &[&str] = &[
+    "$schema",
+    "CampaignStatus",
+    "DisableBackgroundPreloads",
+    "LocationGiftingNonSubPrioEnabled",
+    "VoiceEnableDegradation",
+    "VoiceEnableReceiverLimiting",
+    "accessLogsUrls",
+    "address",
+    "ageVerificationInviteVisible",
+    "ageVerificationP",
+    "ageVerificationStatusVisible",
+    "analysisMaxRetries",
+    "analysisRetryInterval",
+    "analyticsSegment_NewUI_PctOfUsers",
+    "analyticsSegment_NewUI_Salt",
+    "announcements",
+    "arrayEspresso",
+    "audioConfig",
+    "availableLanguageCodes",
+    "availableLanguages",
+    "avatarPerfLimiter",
+    "chatboxLogBufferSeconds",
+    "clientApiKey",
+    "clientBPSCeiling",
+    "clientDisconnectTimeout",
+    "clientMaxDatagrams",
+    "clientNetDispatchThread",
+    "clientNetDispatchThreadMobile",
+    "clientQR",
+    "clientReservedPlayerBPS",
+    "clientSentCountAllowance",
+    "clientUseAck2",
+    "constants",
+    "contactEmail",
+    "copyrightEmail",
+    "copyrightFormUrl",
+    "currentPrivacyVersion",
+    "currentTOSVersion",
+    "defaultAvatar",
+    "defaultStickerSet",
+    "devLanguageCodes",
+    "devSdkUrl",
+    "devSdkVersion",
+    "dis-countdown",
+    "disableAVProInProton",
+    "disableAvatarCopying",
+    "disableAvatarGating",
+    "disableCaptcha",
+    "disableCommunityLabs",
+    "disableCommunityLabsPromotion",
+    "disableEmail",
+    "disableEventStream",
+    "disableFeedbackGating",
+    "disableFrontendBuilds",
+    "disableGiftDrops",
+    "disableHello",
+    "disableOculusSubs",
+    "disableRegistration",
+    "disableSteamNetworking",
+    "disableTwoFactorAuth",
+    "disableUdon",
+    "disableUpgradeAccount",
+    "downloadLinkWindows",
+    "downloadUrls",
+    "dwellBackoffSchedule",
+    "dynamicWorldRows",
+    "economyLedgerMode",
+    "economyPauseEnd",
+    "economyPauseStart",
+    "economyPurchaseRepairEnabled",
+    "economyState",
+    "enableVRCPlusWorldLists",
+    "eventShelfCampaigns",
+    "events",
+    "forceUseLatestWorld",
+    "generatorPublicCaptcha",
+    "giftDisplayType",
+    "globalCacheVersion",
+    "globalCacheVersionDefault",
+    "googleApiClientId",
+    "googleApiUnityClientId",
+    "heightTimeoutMap",
+    "homeWorldId",
+    "homepageRedirectTarget",
+    "hubWorldId",
+    "immunityHeaderGitEvents",
+    "iosAppVersion",
+    "iosVersion",
+    "jobsEmail",
+    "justifyProfileCountryTimeout",
+    "justifyRankEntryBulk",
+    "labelSubscriberGenerator",
+    "loadingScreenWeights",
+    "localizedInstanceExcludedLanguageCodes",
+    "loopNewsPhotonLoggingWeight",
+    "lowMemoryGoHomeTimeout",
+    "maxUserEmoji",
+    "maxUserStickers",
+    "maximumUnityVersionForUploads",
+    "minSupportedClientBuildNumber",
+    "minimumUnityVersionForUploads",
+    "moderationEmail",
+    "ninkilim",
+    "notAllowedToSelectAvatarInPrivateWorldMessage",
+    "offlineAnalysis",
+    "photonNameserverOverrides",
+    "photonPublicKeys",
+    "player-url-resolver-sha1",
+    "player-url-resolver-sha1-gfn-override",
+    "player-url-resolver-version",
+    "player-url-resolver-version-gfn-override",
+    "profileDefaults",
+    "propComponentList",
+    "publicKey",
+    "publicTimer",
+    "questMinimumLowMemoryThreshold",
+    "reportCategories",
+    "reportFormUrl",
+    "reportOptions",
+    "reportReasons",
+    "requireAgeVerificationBetaTag",
+    "restNightlyApi",
+    "rotationAttribute",
+    "sdkDeveloperFaqUrl",
+    "sdkDiscordUrl",
+    "sdkNotAllowedToPublishMessage",
+    "sdkUnityVersion",
+    "semaphoreSouvenir",
+    "showLoginQRCode",
+    "skipLegDay",
+    "sliceActiveFormatTtlListener",
+    "supportEmail",
+    "supportFormUrl",
+    "thresholdProtocolArrayIpv4",
+    "throttleLoss",
+    "ticketFormationSegmentPocket",
+    "timeOutWorldId",
+    "timeRankingBeachKeyword",
+    "timekeeping",
+    "timeoutPrototypeRankGroup",
+    "tutorialWorldId",
+    "updateRateMsMaximum",
+    "updateRateMsMinimum",
+    "updateRateMsNormal",
+    "updateRateMsUdonManual",
+    "uploadAnalysisPercent",
+    "useReliableUdpForVoice",
+    "use_void_requiem_core",
+    "varietyBoxPriority",
+    "viveWindowsUrl",
+    "voiceConfig",
+    "voiceMaxPlaybackSourcesMobile",
+    "voiceMaxPlaybackSourcesPC",
+    "websocketMaxFriendsRefreshDelay",
+    "websocketQuickReconnectTime",
+    "websocketReconnectMaxDelay",
+];
 
+pub fn clean_domain_entry(entry: &str) -> String {
+    let mut s = entry.trim();
+    if let Some(pos) = s.find("://") {
+        s = &s[pos + 3..];
+    }
+    if let Some(pos) = s.find('/') {
+        s = &s[..pos];
+    }
+    if let Some(pos) = s.find(':') {
+        s = &s[..pos];
+    }
+    s.trim().to_lowercase()
+}
+
+pub fn is_valid_domain_or_glob(entry: &str) -> bool {
+    let cleaned = clean_domain_entry(entry);
+    if cleaned.is_empty() {
+        return false;
+    }
+    if cleaned == "localhost" {
+        return true;
+    }
+    if cleaned.parse::<std::net::IpAddr>().is_ok() {
+        return true;
+    }
+    let bare = cleaned.trim_start_matches("*.");
+    if bare.is_empty() || bare.starts_with('.') || bare.ends_with('.') || bare.contains("..") {
+        return false;
+    }
+    if !bare.contains('.') {
+        return false;
+    }
+    for c in bare.chars() {
+        if !c.is_ascii_alphanumeric() && c != '.' && c != '-' && c != '_' {
+            return false;
+        }
+    }
+    let parts: Vec<&str> = bare.split('.').collect();
+    if parts.len() < 2 {
+        return false;
+    }
+    for part in &parts {
+        if part.is_empty() || part.starts_with('-') || part.ends_with('-') {
+            return false;
+        }
+    }
+    let tld = parts[parts.len() - 1];
+    if tld.chars().all(|c| c.is_ascii_digit()) {
+        return false;
+    }
+    true
+}
+
+pub fn map_key_to_category(key: &str) -> Option<BlockCategory> {
+    if KNOWN_NON_URLLIST_KEYS.iter().any(|k| k.eq_ignore_ascii_case(key)) {
+        return None;
+    }
+    match key {
+        "urlList" | "Videos" | "video" | "videos" => Some(BlockCategory::Video),
+        "imageHostUrlList" | "Images" | "image" | "images" => Some(BlockCategory::Images),
+        "stringHostUrlList" | "Strings" | "string" | "strings" => Some(BlockCategory::Strings),
+        "whiteListedAssetUrls" => None,
+        other => {
+            let trimmed = other.trim();
+            if trimmed.is_empty() || trimmed.starts_with('$') {
+                None
+            } else {
+                Some(BlockCategory::Custom(trimmed.to_string()))
+            }
+        }
+    }
+}
 
 /// Parse VRChat config and multiple community blocklists, smartly enforcing safety invariants
 /// and tracking blocked domain counts per list and total.
@@ -472,118 +760,101 @@ pub fn parse_all_domain_lists(
     vrc_json_str: &str,
     community_lists: &[RawBlocklistInput],
 ) -> Result<DomainLists> {
-    #[derive(Deserialize, Default)]
-    struct VrcRemoteConfig {
-        #[serde(default, rename = "urlList")]
-        url_list: Vec<String>,
-        #[serde(default, rename = "imageHostUrlList")]
-        image_list: Vec<String>,
-        #[serde(default, rename = "stringHostUrlList")]
-        string_list: Vec<String>,
-        #[serde(default, rename = "whiteListedAssetUrls")]
-        asset_urls: Vec<String>,
-    }
-
-    let parsed_vrc: VrcRemoteConfig = serde_json::from_str(vrc_json_str)?;
-
-    let mut official_video: HashSet<String> = HashSet::new();
-    for u in &parsed_vrc.url_list {
-        let cleaned = clean_domain_entry(u);
-        if !cleaned.is_empty() {
-            official_video.insert(cleaned);
-        }
-    }
-    let mut official_images: HashSet<String> = HashSet::new();
-    for u in &parsed_vrc.image_list {
-        let cleaned = clean_domain_entry(u);
-        if !cleaned.is_empty() {
-            official_images.insert(cleaned);
-        }
-    }
-    let mut official_strings: HashSet<String> = HashSet::new();
-    for u in &parsed_vrc.string_list {
-        let cleaned = clean_domain_entry(u);
-        if !cleaned.is_empty() {
-            official_strings.insert(cleaned);
-        }
-    }
+    let parsed_vrc: serde_json::Value = serde_json::from_str(vrc_json_str)?;
     let mut protected: HashSet<String> = HashSet::new();
-    for u in &parsed_vrc.asset_urls {
-        let cleaned = clean_domain_entry(u);
-        if !cleaned.is_empty() {
-            protected.insert(cleaned.clone());
-            let bare = cleaned.trim_start_matches("*.");
-            protected.insert(bare.to_string());
-            protected.insert(format!("*.{bare}"));
+
+    let mut official_domains_by_cat: BTreeMap<BlockCategory, HashSet<String>> = BTreeMap::new();
+    let mut raw_domains_by_cat: BTreeMap<BlockCategory, HashSet<String>> = BTreeMap::new();
+
+    if let Some(vrc_obj) = parsed_vrc.as_object() {
+        if let Some(asset_urls) = vrc_obj.get("whiteListedAssetUrls").and_then(|v| v.as_array()) {
+            for item in asset_urls {
+                if let Some(s) = item.as_str() {
+                    let cleaned = clean_domain_entry(s);
+                    if !cleaned.is_empty() {
+                        protected.insert(cleaned.clone());
+                        let bare = cleaned.trim_start_matches("*.");
+                        protected.insert(bare.to_string());
+                        protected.insert(format!("*.{bare}"));
+                    }
+                }
+            }
+        }
+
+        for (key, val) in vrc_obj {
+            if let Some(cat) = map_key_to_category(key)
+                && let Some(arr) = val.as_array() {
+                    for item in arr {
+                        if let Some(s) = item.as_str()
+                            && is_valid_domain_or_glob(s) {
+                                let cleaned = clean_domain_entry(s);
+                                if !cleaned.is_empty() {
+                                    official_domains_by_cat.entry(cat.clone()).or_default().insert(cleaned.clone());
+                                    raw_domains_by_cat.entry(cat.clone()).or_default().insert(cleaned);
+                                }
+                            }
+                    }
+                }
         }
     }
 
     struct CommData {
         name: String,
         enabled: bool,
-        video: HashSet<String>,
-        images: HashSet<String>,
-        strings: HashSet<String>,
+        domains_by_cat: BTreeMap<BlockCategory, HashSet<String>>,
     }
 
     let mut comm_data: Vec<CommData> = Vec::new();
-    let mut raw_video = official_video.clone();
-    let mut raw_images = official_images.clone();
-    let mut raw_strings = official_strings.clone();
 
     for item in community_lists {
         if !item.enabled || item.json.trim().is_empty() {
             comm_data.push(CommData {
                 name: item.name.clone(),
                 enabled: false,
-                video: HashSet::new(),
-                images: HashSet::new(),
-                strings: HashSet::new(),
+                domains_by_cat: BTreeMap::new(),
             });
             continue;
         }
 
-        let parsed: VrcRemoteConfig = serde_json::from_str(&item.json).unwrap_or_default();
-        let mut v_set = HashSet::new();
-        for u in &parsed.url_list {
-            let cleaned = clean_domain_entry(u);
-            if !cleaned.is_empty() {
-                v_set.insert(cleaned.clone());
-                raw_video.insert(cleaned);
+        let parsed: serde_json::Value = serde_json::from_str(&item.json).unwrap_or(serde_json::Value::Null);
+        let mut list_by_cat: BTreeMap<BlockCategory, HashSet<String>> = BTreeMap::new();
+
+        if let Some(obj) = parsed.as_object() {
+            if let Some(asset_urls) = obj.get("whiteListedAssetUrls").and_then(|v| v.as_array()) {
+                for entry in asset_urls {
+                    if let Some(s) = entry.as_str() {
+                        let cleaned = clean_domain_entry(s);
+                        if !cleaned.is_empty() {
+                            protected.insert(cleaned.clone());
+                            let bare = cleaned.trim_start_matches("*.");
+                            protected.insert(bare.to_string());
+                            protected.insert(format!("*.{bare}"));
+                        }
+                    }
+                }
             }
-        }
-        let mut i_set = HashSet::new();
-        for u in &parsed.image_list {
-            let cleaned = clean_domain_entry(u);
-            if !cleaned.is_empty() {
-                i_set.insert(cleaned.clone());
-                raw_images.insert(cleaned);
-            }
-        }
-        let mut s_set = HashSet::new();
-        for u in &parsed.string_list {
-            let cleaned = clean_domain_entry(u);
-            if !cleaned.is_empty() {
-                s_set.insert(cleaned.clone());
-                raw_strings.insert(cleaned);
-            }
-        }
-        for u in &parsed.asset_urls {
-            let cleaned = clean_domain_entry(u);
-            if !cleaned.is_empty() {
-                protected.insert(cleaned.clone());
-                let bare = cleaned.trim_start_matches("*.");
-                protected.insert(bare.to_string());
-                protected.insert(format!("*.{bare}"));
+
+            for (key, val) in obj {
+                if let Some(cat) = map_key_to_category(key)
+                    && let Some(arr) = val.as_array() {
+                        for entry in arr {
+                            if let Some(s) = entry.as_str()
+                                && is_valid_domain_or_glob(s) {
+                                    let cleaned = clean_domain_entry(s);
+                                    if !cleaned.is_empty() {
+                                        list_by_cat.entry(cat.clone()).or_default().insert(cleaned.clone());
+                                        raw_domains_by_cat.entry(cat.clone()).or_default().insert(cleaned);
+                                    }
+                                }
+                        }
+                    }
             }
         }
 
         comm_data.push(CommData {
             name: item.name.clone(),
             enabled: true,
-            video: v_set,
-            images: i_set,
-            strings: s_set,
+            domains_by_cat: list_by_cat,
         });
     }
 
@@ -602,13 +873,21 @@ pub fn parse_all_domain_lists(
         protected.insert(bare.to_string());
     }
 
-    // Detect any domain present in two or more lists and strictly protect it from pure video/image/string blocking
+    // Detect any domain present in two or more DIFFERENT categories and strictly protect it from pure blocking
     let mut in_multiple = HashSet::new();
-    for d in raw_video.iter().chain(raw_images.iter()).chain(raw_strings.iter()) {
-        let count = (raw_video.contains(d) as usize)
-            + (raw_images.contains(d) as usize)
-            + (raw_strings.contains(d) as usize);
-        if count >= 2 {
+    let mut all_unique_domains: HashSet<String> = HashSet::new();
+    for set in raw_domains_by_cat.values() {
+        all_unique_domains.extend(set.iter().cloned());
+    }
+
+    for d in &all_unique_domains {
+        let mut category_count = 0;
+        for set in raw_domains_by_cat.values() {
+            if set.contains(d) {
+                category_count += 1;
+            }
+        }
+        if category_count >= 2 {
             in_multiple.insert(d.clone());
         }
     }
@@ -634,18 +913,33 @@ pub fn parse_all_domain_lists(
         is_vrc_or_asset_protected(d)
     };
 
-    let mut video_domains: Vec<String> = raw_video
-        .into_iter()
-        .filter(|d| !is_pure_category_protected(d))
-        .collect();
-    let mut image_domains: Vec<String> = raw_images
-        .into_iter()
-        .filter(|d| !is_pure_category_protected(d))
-        .collect();
-    let mut string_domains: Vec<String> = raw_strings
-        .into_iter()
-        .filter(|d| !is_pure_category_protected(d))
-        .collect();
+    let mut video_domains: Vec<String> = raw_domains_by_cat
+        .get(&BlockCategory::Video)
+        .map(|s| s.iter().filter(|d| !is_pure_category_protected(d)).cloned().collect())
+        .unwrap_or_default();
+    let mut image_domains: Vec<String> = raw_domains_by_cat
+        .get(&BlockCategory::Images)
+        .map(|s| s.iter().filter(|d| !is_pure_category_protected(d)).cloned().collect())
+        .unwrap_or_default();
+    let mut string_domains: Vec<String> = raw_domains_by_cat
+        .get(&BlockCategory::Strings)
+        .map(|s| s.iter().filter(|d| !is_pure_category_protected(d)).cloned().collect())
+        .unwrap_or_default();
+
+    let mut custom_domains: BTreeMap<String, Vec<String>> = BTreeMap::new();
+    let mut custom_categories_set: HashSet<String> = HashSet::new();
+
+    for (cat, domains) in &raw_domains_by_cat {
+        if let BlockCategory::Custom(name) = cat {
+            let pure: Vec<String> = domains
+                .iter()
+                .filter(|d| !is_pure_category_protected(d))
+                .cloned()
+                .collect();
+            custom_domains.insert(name.clone(), pure);
+            custom_categories_set.insert(name.clone());
+        }
+    }
 
     let mut rest_domains: Vec<String> = in_multiple
         .into_iter()
@@ -656,8 +950,16 @@ pub fn parse_all_domain_lists(
     image_domains.sort();
     string_domains.sort();
     rest_domains.sort();
+    for v in custom_domains.values_mut() {
+        v.sort();
+    }
 
+    let mut custom_categories: Vec<String> = custom_categories_set.into_iter().collect();
+    custom_categories.sort();
+
+    #[cfg(test)]
     let mut protected_list: Vec<String> = protected.into_iter().collect();
+    #[cfg(test)]
     protected_list.sort();
 
     // Calculate per-list stats
@@ -665,51 +967,70 @@ pub fn parse_all_domain_lists(
     let i_set: HashSet<&str> = image_domains.iter().map(|s| s.as_str()).collect();
     let s_set: HashSet<&str> = string_domains.iter().map(|s| s.as_str()).collect();
     let r_set: HashSet<&str> = rest_domains.iter().map(|s| s.as_str()).collect();
+    let mut custom_sets: BTreeMap<String, HashSet<&str>> = BTreeMap::new();
+    for (name, list) in &custom_domains {
+        custom_sets.insert(name.clone(), list.iter().map(|s| s.as_str()).collect());
+    }
 
     let mut list_stats = Vec::new();
 
     // 1. Official stats
-    let off_v = official_video.iter().filter(|d| v_set.contains(d.as_str())).count();
-    let off_i = official_images.iter().filter(|d| i_set.contains(d.as_str())).count();
-    let off_s = official_strings.iter().filter(|d| s_set.contains(d.as_str())).count();
-    let off_r = official_video.iter()
-        .chain(official_images.iter())
-        .chain(official_strings.iter())
-        .filter(|d| r_set.contains(d.as_str()))
-        .collect::<HashSet<_>>()
-        .len();
+    let mut off_counts = CategoryCounts::default();
+    if let Some(set) = official_domains_by_cat.get(&BlockCategory::Video) {
+        off_counts.video = set.iter().filter(|d| v_set.contains(d.as_str())).count();
+    }
+    if let Some(set) = official_domains_by_cat.get(&BlockCategory::Images) {
+        off_counts.image = set.iter().filter(|d| i_set.contains(d.as_str())).count();
+    }
+    if let Some(set) = official_domains_by_cat.get(&BlockCategory::Strings) {
+        off_counts.string = set.iter().filter(|d| s_set.contains(d.as_str())).count();
+    }
+    for (name, c_set) in &custom_sets {
+        if let Some(set) = official_domains_by_cat.get(&BlockCategory::Custom(name.clone())) {
+            let count = set.iter().filter(|d| c_set.contains(d.as_str())).count();
+            off_counts.set_for_category(&BlockCategory::Custom(name.clone()), count);
+        }
+    }
+    let mut off_all_domains = HashSet::new();
+    for set in official_domains_by_cat.values() {
+        off_all_domains.extend(set.iter());
+    }
+    off_counts.rest = off_all_domains.iter().filter(|d| r_set.contains(d.as_str())).count();
 
     list_stats.push(BlocklistStats {
         name: "Official".to_string(),
-        counts: CategoryCounts {
-            video: off_v,
-            image: off_i,
-            string: off_s,
-            rest: off_r,
-        },
+        counts: off_counts,
         enabled: true,
     });
 
     // 2. Community stats per list
     for comm in comm_data {
         if comm.enabled {
-            let cv = comm.video.iter().filter(|d| v_set.contains(d.as_str())).count();
-            let ci = comm.images.iter().filter(|d| i_set.contains(d.as_str())).count();
-            let cs = comm.strings.iter().filter(|d| s_set.contains(d.as_str())).count();
-            let cr = comm.video.iter()
-                .chain(comm.images.iter())
-                .chain(comm.strings.iter())
-                .filter(|d| r_set.contains(d.as_str()))
-                .collect::<HashSet<_>>()
-                .len();
+            let mut counts = CategoryCounts::default();
+            if let Some(set) = comm.domains_by_cat.get(&BlockCategory::Video) {
+                counts.video = set.iter().filter(|d| v_set.contains(d.as_str())).count();
+            }
+            if let Some(set) = comm.domains_by_cat.get(&BlockCategory::Images) {
+                counts.image = set.iter().filter(|d| i_set.contains(d.as_str())).count();
+            }
+            if let Some(set) = comm.domains_by_cat.get(&BlockCategory::Strings) {
+                counts.string = set.iter().filter(|d| s_set.contains(d.as_str())).count();
+            }
+            for (name, c_set) in &custom_sets {
+                if let Some(set) = comm.domains_by_cat.get(&BlockCategory::Custom(name.clone())) {
+                    let count = set.iter().filter(|d| c_set.contains(d.as_str())).count();
+                    counts.set_for_category(&BlockCategory::Custom(name.clone()), count);
+                }
+            }
+            let mut comm_all = HashSet::new();
+            for set in comm.domains_by_cat.values() {
+                comm_all.extend(set.iter());
+            }
+            counts.rest = comm_all.iter().filter(|d| r_set.contains(d.as_str())).count();
+
             list_stats.push(BlocklistStats {
                 name: comm.name,
-                counts: CategoryCounts {
-                    video: cv,
-                    image: ci,
-                    string: cs,
-                    rest: cr,
-                },
+                counts,
                 enabled: true,
             });
         } else {
@@ -721,107 +1042,140 @@ pub fn parse_all_domain_lists(
         }
     }
 
-    let total_counts = CategoryCounts {
+    let mut total_counts = CategoryCounts {
         video: video_domains.len(),
         image: image_domains.len(),
         string: string_domains.len(),
+        custom: BTreeMap::new(),
         rest: rest_domains.len(),
     };
+    for (name, domains) in &custom_domains {
+        total_counts.set_for_category(&BlockCategory::Custom(name.clone()), domains.len());
+    }
 
     Ok(DomainLists {
         video_domains,
         image_domains,
         string_domains,
+        custom_domains,
         rest_domains,
         #[cfg(test)]
         protected_domains: protected_list,
         list_stats,
         total_counts,
+        custom_categories,
     })
 }
 
-fn clean_domain_entry(entry: &str) -> String {
-    let mut s = entry.trim();
-    if let Some(pos) = s.find("://") {
-        s = &s[pos + 3..];
-    }
-    if let Some(pos) = s.find('/') {
-        s = &s[..pos];
-    }
-    if let Some(pos) = s.find(':') {
-        s = &s[..pos];
-    }
-    s.trim().to_lowercase()
-}
-
 impl BlockCategory {
-    pub const ALL: [Self; 4] = [Self::Video, Self::Images, Self::Strings, Self::Rest];
-
-    pub fn label(&self) -> &'static str {
+    pub fn label(&self) -> &str {
         match self {
             Self::Video => "Videos",
             Self::Images => "Images",
             Self::Strings => "Strings",
+            Self::Custom(name) => name.as_str(),
             Self::Rest => "Rest",
         }
     }
 
-    pub fn header_tag(&self) -> &'static str {
+    pub fn short_label(&self) -> &str {
         match self {
-            Self::Video => "# ----- BEGIN LVR VIDEO BLOCK -----",
-            Self::Images => "# ----- BEGIN LVR IMAGE BLOCK -----",
-            Self::Strings => "# ----- BEGIN LVR STRING BLOCK -----",
-            Self::Rest => "# ----- BEGIN LVR REST BLOCK -----",
+            Self::Video => "Video",
+            Self::Images => "Image",
+            Self::Strings => "String",
+            Self::Custom(name) => name.as_str(),
+            Self::Rest => "Rest",
         }
     }
 
-    pub fn footer_tag(&self) -> &'static str {
+    pub fn header_tag(&self) -> String {
         match self {
-            Self::Video => "# ----- END LVR VIDEO BLOCK -----",
-            Self::Images => "# ----- END LVR IMAGE BLOCK -----",
-            Self::Strings => "# ----- END LVR STRING BLOCK -----",
-            Self::Rest => "# ----- END LVR REST BLOCK -----",
+            Self::Video => "# ----- BEGIN LVR VIDEO BLOCK -----".to_string(),
+            Self::Images => "# ----- BEGIN LVR IMAGE BLOCK -----".to_string(),
+            Self::Strings => "# ----- BEGIN LVR STRING BLOCK -----".to_string(),
+            Self::Custom(name) => format!("# ----- BEGIN LVR {} BLOCK -----", name.to_uppercase()),
+            Self::Rest => "# ----- BEGIN LVR REST BLOCK -----".to_string(),
         }
     }
 
-    /// The pure domains assigned exclusively to this category.
-    /// Uses dynamic domains if fetched on startup, or the embedded fallback config.
-    pub fn domains(&self) -> Vec<String> {
-        let lists = active_domains();
+    pub fn footer_tag(&self) -> String {
         match self {
-            Self::Video => lists.video_domains.clone(),
-            Self::Images => lists.image_domains.clone(),
-            Self::Strings => lists.string_domains.clone(),
-            Self::Rest => lists.rest_domains.clone(),
+            Self::Video => "# ----- END LVR VIDEO BLOCK -----".to_string(),
+            Self::Images => "# ----- END LVR IMAGE BLOCK -----".to_string(),
+            Self::Strings => "# ----- END LVR STRING BLOCK -----".to_string(),
+            Self::Custom(name) => format!("# ----- END LVR {} BLOCK -----", name.to_uppercase()),
+            Self::Rest => "# ----- END LVR REST BLOCK -----".to_string(),
+        }
+    }
+
+    pub fn from_tag(tag: &str) -> Option<Self> {
+        let trimmed = tag.trim();
+        let middle = trimmed
+            .strip_prefix("# ----- BEGIN LVR ")?
+            .strip_suffix(" BLOCK -----")?
+            .trim();
+        match middle {
+            "VIDEO" => Some(Self::Video),
+            "IMAGE" => Some(Self::Images),
+            "STRING" => Some(Self::Strings),
+            "REST" => Some(Self::Rest),
+            custom => {
+                let lists = active_domains();
+                if let Some(matching) = lists.custom_categories.iter().find(|c| c.eq_ignore_ascii_case(custom)) {
+                    Some(Self::Custom(matching.clone()))
+                } else {
+                    Some(Self::Custom(custom.to_string()))
+                }
+            }
         }
     }
 }
 
 /// State of all domain blocking categories.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct BlockState {
     pub video_blocked: bool,
     pub images_blocked: bool,
     pub strings_blocked: bool,
     pub rest_blocked: bool,
+    #[serde(default)]
+    pub custom_blocked: BTreeMap<String, bool>,
 }
 
 impl BlockState {
-    pub fn is_blocked(&self, category: BlockCategory) -> bool {
+    pub fn is_blocked(&self, category: &BlockCategory) -> bool {
         match category {
             BlockCategory::Video => self.video_blocked,
             BlockCategory::Images => self.images_blocked,
             BlockCategory::Strings => self.strings_blocked,
             BlockCategory::Rest => self.rest_blocked,
+            BlockCategory::Custom(name) => self
+                .custom_blocked
+                .iter()
+                .find(|(k, _)| k.eq_ignore_ascii_case(name))
+                .map(|(_, &b)| b)
+                .unwrap_or(false),
         }
     }
 
-    pub fn set_blocked(&mut self, category: BlockCategory, blocked: bool) {
+    pub fn set_blocked(&mut self, category: &BlockCategory, blocked: bool) {
         match category {
             BlockCategory::Video => self.video_blocked = blocked,
             BlockCategory::Images => self.images_blocked = blocked,
             BlockCategory::Strings => self.strings_blocked = blocked,
             BlockCategory::Rest => self.rest_blocked = blocked,
+            BlockCategory::Custom(name) => {
+                if let Some(existing_key) = self
+                    .custom_blocked
+                    .keys()
+                    .find(|k| k.eq_ignore_ascii_case(name))
+                    .cloned()
+                {
+                    self.custom_blocked.insert(existing_key, blocked);
+                } else {
+                    self.custom_blocked.insert(name.clone(), blocked);
+                }
+            }
         }
     }
 }
@@ -888,30 +1242,33 @@ pub fn vrc_tools_dir(prefix: &Path) -> PathBuf {
 pub fn read_block_state(prefix: &Path) -> BlockState {
     let hosts_path = prefix_hosts_path(prefix);
     let content = fs::read_to_string(&hosts_path).unwrap_or_default();
-    BlockState {
-        video_blocked: content.contains(BlockCategory::Video.header_tag()),
-        images_blocked: content.contains(BlockCategory::Images.header_tag()),
-        strings_blocked: content.contains(BlockCategory::Strings.header_tag()),
-        rest_blocked: content.contains(BlockCategory::Rest.header_tag()),
+    let mut state = BlockState::default();
+
+    for line in content.lines() {
+        if let Some(cat) = BlockCategory::from_tag(line.trim()) {
+            state.set_blocked(&cat, true);
+        }
     }
+
+    state
 }
 
 /// Set the blocking state for a given category.
-pub fn set_category_blocked(prefix: &Path, category: BlockCategory, block: bool) -> Result<()> {
+pub fn set_category_blocked(prefix: &Path, category: &BlockCategory, block: bool) -> Result<()> {
     let mut state = read_block_state(prefix);
     state.set_blocked(category, block);
-    sync_all(prefix, state)?;
+    sync_all(prefix, &state)?;
     Ok(())
 }
 
 /// Apply full block state (hosts + yt-dlp) cleanly in one atomic operation.
-pub fn sync_all(prefix: &Path, state: BlockState) -> Result<()> {
+pub fn sync_all(prefix: &Path, state: &BlockState) -> Result<()> {
     update_hosts_file(prefix, state)?;
     update_ytdlp_file(prefix, state.video_blocked)?;
     Ok(())
 }
 
-fn update_hosts_file(prefix: &Path, state: BlockState) -> Result<()> {
+fn update_hosts_file(prefix: &Path, state: &BlockState) -> Result<()> {
     let hosts_path = prefix_hosts_path(prefix);
     if let Some(parent) = hosts_path.parent() {
         fs::create_dir_all(parent)?;
@@ -925,17 +1282,17 @@ fn update_hosts_file(prefix: &Path, state: BlockState) -> Result<()> {
 
     // Remove any existing LVR blocks
     let mut cleaned = Vec::new();
-    let mut active_block: Option<BlockCategory> = None;
+    let mut inside_lvr_block = false;
 
     for line in existing.lines() {
         let trimmed = line.trim();
-        if let Some(cat) = BlockCategory::ALL.iter().find(|c| c.header_tag() == trimmed) {
-            active_block = Some(*cat);
+        if trimmed.starts_with("# ----- BEGIN LVR ") && trimmed.ends_with(" BLOCK -----") {
+            inside_lvr_block = true;
             continue;
         }
-        if let Some(cat) = active_block {
-            if trimmed == cat.footer_tag() {
-                active_block = None;
+        if inside_lvr_block {
+            if trimmed.starts_with("# ----- END LVR ") && trimmed.ends_with(" BLOCK -----") {
+                inside_lvr_block = false;
             }
             continue;
         }
@@ -948,16 +1305,17 @@ fn update_hosts_file(prefix: &Path, state: BlockState) -> Result<()> {
     }
 
     // Append blocks for whichever categories are enabled
-    for cat in BlockCategory::ALL {
-        if state.is_blocked(cat) {
-            result.push_str(cat.header_tag());
+    let lists = active_domains();
+    for cat in lists.all_categories() {
+        if state.is_blocked(&cat) {
+            result.push_str(&cat.header_tag());
             result.push('\n');
             result.push_str(&format!(
                 "# Blocked by LinuxVR (lvr): {}\n",
                 cat.label()
             ));
 
-            for domain in cat.domains() {
+            for domain in lists.domains_for_category(&cat) {
                 let bare = domain.trim_start_matches("*.");
                 if bare.is_empty() || bare == "localhost" {
                     continue;
@@ -972,7 +1330,7 @@ fn update_hosts_file(prefix: &Path, state: BlockState) -> Result<()> {
                 }
             }
 
-            result.push_str(cat.footer_tag());
+            result.push_str(&cat.footer_tag());
             result.push('\n');
         }
     }
@@ -1176,7 +1534,7 @@ mod tests {
     async fn community_config_url_and_dynamic_loading() {
         assert_eq!(
             crate::config::DEFAULT_COMMUNITY_CONFIG_URL,
-            "https://github.com/Bluscream/lvr/raw/refs/heads/main/assets/lists/config.json"
+            "https://github.com/Bluscream/lvr/raw/refs/heads/main/assets/lists/community.json"
         );
 
         // When community blocklists are disabled, only VRChat default fallback lists are present
@@ -1293,6 +1651,73 @@ mod tests {
         assert_eq!(lists.total_counts.string, 2); // pastebin.com, custom-string2.com
         assert_eq!(lists.total_counts.rest, 1); // shared.com
         assert_eq!(lists.total_counts.total(), 9);
+    }
+
+    #[test]
+    fn custom_category_expansion_and_non_urllist_key_stripping() {
+        let vrc_json = r#"{
+            "urlList": ["youtube.com"],
+            "imageHostUrlList": ["imgur.com"],
+            "stringHostUrlList": ["pastebin.com"],
+            "availableLanguages": ["English", "French", "German"],
+            "availableLanguageCodes": ["en", "fr", "de"],
+            "clientApiKey": "some-key",
+            "analysisMaxRetries": 14
+        }"#;
+
+        let comm_json = r#"{
+            "$schema": "./blocklist.schema.json",
+            "Analytics": ["api.amplitude.com", "analytics.unity3d.com"],
+            "Telemetry": ["telemetry.example.com"],
+            "invalidKey": ["not a domain", "also not domain"]
+        }"#;
+
+        let inputs = vec![RawBlocklistInput {
+            name: "Community".to_string(),
+            json: comm_json.to_string(),
+            enabled: true,
+        }];
+
+        let lists = parse_all_domain_lists(vrc_json, &inputs).expect("parse custom categories");
+
+        // Check custom categories are parsed
+        assert!(lists.custom_categories.contains(&"Analytics".to_string()));
+        assert!(lists.custom_categories.contains(&"Telemetry".to_string()));
+
+        // Check non-urllist keys are stripped
+        assert!(!lists.custom_categories.contains(&"availableLanguages".to_string()));
+        assert!(!lists.custom_categories.contains(&"availableLanguageCodes".to_string()));
+        assert!(!lists.custom_categories.contains(&"clientApiKey".to_string()));
+        assert!(!lists.custom_categories.contains(&"invalidKey".to_string()));
+
+        // Check all_categories ordering: Videos, Images, Strings, custom..., Rest
+        let all_cats = lists.all_categories();
+        assert_eq!(all_cats[0], BlockCategory::Video);
+        assert_eq!(all_cats[1], BlockCategory::Images);
+        assert_eq!(all_cats[2], BlockCategory::Strings);
+        assert!(all_cats.contains(&BlockCategory::Custom("Analytics".to_string())));
+        assert!(all_cats.contains(&BlockCategory::Custom("Telemetry".to_string())));
+        assert_eq!(*all_cats.last().unwrap(), BlockCategory::Rest);
+
+        // Check domains for custom category
+        let analytics_domains = lists.domains_for_category(&BlockCategory::Custom("Analytics".to_string()));
+        assert!(analytics_domains.contains(&"api.amplitude.com".to_string()));
+        assert!(analytics_domains.contains(&"analytics.unity3d.com".to_string()));
+
+        // Check tags and header parsing
+        let analytics_cat = BlockCategory::Custom("Analytics".to_string());
+        assert_eq!(analytics_cat.header_tag(), "# ----- BEGIN LVR ANALYTICS BLOCK -----");
+        assert_eq!(analytics_cat.footer_tag(), "# ----- END LVR ANALYTICS BLOCK -----");
+        assert_eq!(BlockCategory::from_tag("# ----- BEGIN LVR ANALYTICS BLOCK -----"), Some(analytics_cat));
+    }
+
+    #[test]
+    fn local_community_json_loads_analytics_category() {
+        let lists = build_domain_lists_fallback_with_community(true);
+        assert!(lists.custom_categories.contains(&"Analytics".to_string()));
+        let analytics_domains = lists.domains_for_category(&BlockCategory::Custom("Analytics".to_string()));
+        assert!(analytics_domains.contains(&"api.amplitude.com".to_string()));
+        assert!(analytics_domains.len() >= 100);
     }
 }
 

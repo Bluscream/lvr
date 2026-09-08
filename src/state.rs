@@ -140,14 +140,13 @@ fn clean_node_name(name: &str) -> String {
             break;
         }
     }
-    if let Some(pos) = cleaned.rfind('.') {
-        if pos > 0 && pos < cleaned.len() - 1 {
+    if let Some(pos) = cleaned.rfind('.')
+        && pos > 0 && pos < cleaned.len() - 1 {
             let suffix = &cleaned[pos + 1..];
             if suffix.contains("stereo") || suffix.contains("mono") || suffix.contains("multichannel") {
                 cleaned = &cleaned[..pos];
             }
         }
-    }
     if let Some(rest) = cleaned.strip_prefix("usb-") {
         cleaned = rest;
     } else if let Some(rest) = cleaned.strip_prefix("pci-") {

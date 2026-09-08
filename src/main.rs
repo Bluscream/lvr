@@ -301,11 +301,10 @@ fn ensure_display_environment() {
     // Wait up to 15 seconds (75 iterations * 200ms) for display socket to appear
     for _ in 0..75 {
         // If WAYLAND_DISPLAY is already set, check if the socket exists
-        if let Ok(wayland_display) = std::env::var("WAYLAND_DISPLAY") {
-            if runtime_path.join(&wayland_display).exists() {
+        if let Ok(wayland_display) = std::env::var("WAYLAND_DISPLAY")
+            && runtime_path.join(&wayland_display).exists() {
                 return;
             }
-        }
 
         // If DISPLAY is already set, check if the X11 socket exists
         if let Ok(display_var) = std::env::var("DISPLAY") {

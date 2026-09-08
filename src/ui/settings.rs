@@ -303,22 +303,24 @@ fn vrc_files_and_tools(app: &mut LvrApp, ui: &mut Ui) {
         });
 
     let lists = crate::domain_block::active_domains();
+    let categories = lists.all_categories();
     ui.add_space(6.0);
     ui.label(RichText::new("Domains blocked:").strong());
     ui.add_space(3.0);
 
+    let num_columns = 1 + categories.len() + 1;
+
     egui::Grid::new("settings-domains-blocked-grid")
         .striped(true)
-        .num_columns(6)
+        .num_columns(num_columns)
         .spacing([24.0, 6.0])
         .min_col_width(60.0)
         .show(ui, |ui| {
             // Header row
             ui.label(RichText::new("List").strong());
-            ui.label(RichText::new("Video").strong());
-            ui.label(RichText::new("Image").strong());
-            ui.label(RichText::new("String").strong());
-            ui.label(RichText::new("Rest").strong());
+            for cat in &categories {
+                ui.label(RichText::new(cat.short_label()).strong());
+            }
             ui.label(RichText::new("Total").strong());
             ui.end_row();
 
@@ -326,16 +328,14 @@ fn vrc_files_and_tools(app: &mut LvrApp, ui: &mut Ui) {
             for stat in &lists.list_stats {
                 ui.label(RichText::new(&stat.name).strong());
                 if stat.enabled {
-                    ui.label(stat.counts.video.to_string());
-                    ui.label(stat.counts.image.to_string());
-                    ui.label(stat.counts.string.to_string());
-                    ui.label(stat.counts.rest.to_string());
+                    for cat in &categories {
+                        ui.label(stat.counts.for_category(cat).to_string());
+                    }
                     ui.label(RichText::new(stat.counts.total().to_string()).strong());
                 } else {
-                    ui.label("-");
-                    ui.label("-");
-                    ui.label("-");
-                    ui.label("-");
+                    for _ in &categories {
+                        ui.label("-");
+                    }
                     ui.label(RichText::new("disabled").color(GREY));
                 }
                 ui.end_row();
@@ -343,10 +343,9 @@ fn vrc_files_and_tools(app: &mut LvrApp, ui: &mut Ui) {
 
             // Total row
             ui.label(RichText::new("Total").strong());
-            ui.label(RichText::new(lists.total_counts.video.to_string()).strong());
-            ui.label(RichText::new(lists.total_counts.image.to_string()).strong());
-            ui.label(RichText::new(lists.total_counts.string.to_string()).strong());
-            ui.label(RichText::new(lists.total_counts.rest.to_string()).strong());
+            for cat in &categories {
+                ui.label(RichText::new(lists.total_counts.for_category(cat).to_string()).strong());
+            }
             ui.label(RichText::new(lists.total_counts.total().to_string()).strong().color(GREEN));
             ui.end_row();
         });
@@ -356,8 +355,8 @@ fn vrc_files_and_tools(app: &mut LvrApp, ui: &mut Ui) {
 
     match prefix_opt {
         Some(ref prefix) => {
-            let hosts_file = crate::domain_block::prefix_hosts_path(&prefix);
-            let tools_dir = crate::domain_block::vrc_tools_dir(&prefix);
+            let hosts_file = crate::domain_block::prefix_hosts_path(prefix);
+            let tools_dir = crate::domain_block::vrc_tools_dir(prefix);
 
             ui.horizontal_wrapped(|ui| {
                 if widgets::row_button(ui, "📄 Open Hosts File", Some(BLUE), 180.0).clicked() {

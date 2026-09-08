@@ -1,0 +1,52 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "LVR Blocklist Configuration",
+  "description": "Schema for LinuxVR (lvr) blocklist sources defining domain categories for selective blocking.",
+  "type": "object",
+  "properties": {
+    "$schema": {
+      "type": "string",
+      "description": "URI to the schema definition"
+    },
+    "urlList": {
+      "type": "array",
+      "description": "Video player host domains and URL patterns (mapped to Videos category)",
+      "items": {
+        "type": "string"
+      },
+      "uniqueItems": true
+    },
+    "imageHostUrlList": {
+      "type": "array",
+      "description": "Image host domains and URL patterns (mapped to Images category)",
+      "items": {
+        "type": "string"
+      },
+      "uniqueItems": true
+    },
+    "stringHostUrlList": {
+      "type": "array",
+      "description": "String/text download host domains and URL patterns (mapped to Strings category)",
+      "items": {
+        "type": "string"
+      },
+      "uniqueItems": true
+    },
+    "whiteListedAssetUrls": {
+      "type": "array",
+      "description": "Whitelisted asset host domains that must never be blocked",
+      "items": {
+        "type": "string"
+      },
+      "uniqueItems": true
+    }
+  },
+  "additionalProperties": {
+    "type": "array",
+    "description": "Custom domain category list (e.g. Analytics, Telemetry, Ads)",
+    "items": {
+      "type": "string"
+    },
+    "uniqueItems": true
+  }
+}

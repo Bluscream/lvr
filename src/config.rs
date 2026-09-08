@@ -310,7 +310,7 @@ pub struct CommunityBlocklistSource {
 }
 
 pub const DEFAULT_COMMUNITY_CONFIG_URL: &str =
-    "https://github.com/Bluscream/lvr/raw/refs/heads/main/assets/lists/config.json";
+    "https://github.com/Bluscream/lvr/raw/refs/heads/main/assets/lists/community.json";
 
 pub fn default_community_sources() -> Vec<CommunityBlocklistSource> {
     vec![CommunityBlocklistSource {

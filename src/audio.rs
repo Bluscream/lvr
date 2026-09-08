@@ -103,16 +103,14 @@ pub fn parse_devices(listing: &str) -> Vec<AudioDevice> {
         let Some(device) = current.as_mut() else {
             continue;
         };
-        if device.name.is_empty() {
-            if let Some(rest) = trimmed.strip_prefix("Name: ") {
+        if device.name.is_empty()
+            && let Some(rest) = trimmed.strip_prefix("Name: ") {
                 device.name = rest.trim().to_string();
             }
-        }
-        if device.description.is_empty() {
-            if let Some(rest) = trimmed.strip_prefix("Description: ") {
+        if device.description.is_empty()
+            && let Some(rest) = trimmed.strip_prefix("Description: ") {
                 device.description = rest.trim().to_string();
             }
-        }
     }
     if let Some(device) = current
         && !device.name.is_empty()

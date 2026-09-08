@@ -53,12 +53,11 @@ impl ProcSnapshot {
                 if exclude.contains(&p.pid) || pids.contains(&p.pid) {
                     continue;
                 }
-                if let Some(ppid) = p.ppid {
-                    if pids.contains(&ppid) {
+                if let Some(ppid) = p.ppid
+                    && pids.contains(&ppid) {
                         pids.push(p.pid);
                         added = true;
                     }
-                }
             }
         }
     }

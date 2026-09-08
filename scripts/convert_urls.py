@@ -13,7 +13,7 @@ REFERENCES_DOMAINS_DIR = PROJECT_ROOT / ".references" / "domains"
 LISTS_DIR = PROJECT_ROOT / "assets" / "lists"
 
 HOSTS_OUTPUT_PATH = LISTS_DIR / "all.hosts"
-CONFIG_JSON_PATH = LISTS_DIR / "config.json"
+CONFIG_JSON_PATH = LISTS_DIR / "community.json"
 
 # Blacklist of internal VRChat domains that shouldn't be included
 BLACKLIST_DOMAINS = {

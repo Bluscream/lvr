@@ -133,13 +133,11 @@ fn connector_has_physical_edid(name: &str) -> bool {
             if s.ends_with(name) {
                 let status_path = entry.path().join("status");
                 let edid_path = entry.path().join("edid");
-                if let Ok(status) = fs::read_to_string(&status_path) {
-                    if status.trim() == "connected" {
-                        if let Ok(edid) = fs::read(&edid_path) {
+                if let Ok(status) = fs::read_to_string(&status_path)
+                    && status.trim() == "connected"
+                        && let Ok(edid) = fs::read(&edid_path) {
                             return !edid.is_empty();
                         }
-                    }
-                }
             }
         }
     }
@@ -219,14 +217,13 @@ pub fn remove_virtual_display() -> bool {
     let mut cleaned = false;
 
     // 1. Terminate krfb-virtualmonitor child process if managed
-    if let Ok(mut lock) = VIRTUAL_MONITOR_CHILD.lock() {
-        if let Some(mut child) = lock.take() {
+    if let Ok(mut lock) = VIRTUAL_MONITOR_CHILD.lock()
+        && let Some(mut child) = lock.take() {
             info!("Killing managed krfb-virtualmonitor process (PID: {})", child.id());
             let _ = child.kill();
             let _ = child.wait();
             cleaned = true;
         }
-    }
 
     // Also pkill any lingering krfb-virtualmonitor processes named VR-Headset
     let _ = Command::new("pkill")

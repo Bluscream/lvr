@@ -319,14 +319,14 @@ impl Engine {
                 self.last_audio_poll = None;
             }
             Command::ToggleBlockCategory(category) => {
-                let current = self.block_state.is_blocked(category);
+                let current = self.block_state.is_blocked(&category);
                 self.set_block_category(category, !current).await;
             }
             Command::ReloadDomainLists => {
                 let domain_cfg = self.shared.config().domain_block.clone();
                 let lists = crate::domain_block::reload_domain_lists_with_config(&domain_cfg).await;
                 if let Some(prefix) = crate::domain_block::detect_vrc_prefix("") {
-                    let _ = crate::domain_block::sync_all(&prefix, self.block_state);
+                    let _ = crate::domain_block::sync_all(&prefix, &self.block_state);
                 }
                 self.shared.info(format!(
                     "Updated active domain lists: {} videos, {} images, {} strings, {} shared (total: {})",
@@ -478,7 +478,7 @@ impl Engine {
             default_source: self.cached_default_source.clone(),
             audio_on_vr: self.audio.on_vr,
             entries: entry_status,
-            block_state: self.block_state,
+            block_state: self.block_state.clone(),
             sinks: self.cached_sinks.clone(),
             sources: self.cached_sources.clone(),
             virtual_display_created: self.virtual_display_created,
@@ -1010,9 +1010,9 @@ impl Engine {
             return;
         };
 
-        match crate::domain_block::set_category_blocked(&prefix, category, block) {
+        match crate::domain_block::set_category_blocked(&prefix, &category, block) {
             Ok(()) => {
-                self.block_state.set_blocked(category, block);
+                self.block_state.set_blocked(&category, block);
                 let label = category.label();
                 if block {
                     self.shared.warn(format!("VRChat {label} BLOCKED"));

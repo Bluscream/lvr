@@ -1,6 +1,5 @@
 use egui::{RichText, Ui};
 
-use crate::domain_block::BlockCategory;
 use crate::state::{Command, EntryStatus};
 use crate::ui::widgets::{self, BIG_BUTTON_HEIGHT, BLUE, GREEN, GREY, ORANGE, RED, ROW_BUTTON_HEIGHT};
 use crate::ui::LvrApp;
@@ -127,27 +126,21 @@ fn render_telemetry_hud(app: &LvrApp, ui: &mut Ui) {
 
 /// Section 3: VRChat Domain & Media Shield Controls
 fn render_domain_shields(app: &mut LvrApp, ui: &mut Ui) {
-    let categories = [
-        (BlockCategory::Video, "Videos"),
-        (BlockCategory::Images, "Images"),
-        (BlockCategory::Strings, "Strings"),
-        (BlockCategory::Rest, "Rest"),
-    ];
+    let lists = crate::domain_block::active_domains();
+    let categories = lists.all_categories();
 
     let full = ui.available_width();
     let spacing = ui.spacing().item_spacing.x;
-    let button_w = ((full - spacing * 3.0) / 4.0).floor().max(120.0);
+    let count = categories.len().max(1) as f32;
+    let button_w = ((full - spacing * (count - 1.0)) / count).floor().max(110.0);
 
     ui.horizontal_wrapped(|ui| {
-        for (category, display_name) in categories {
-            let is_blocked = app.status.block_state.is_blocked(category);
-            let (label, tint) = if is_blocked {
-                (format!("{display_name} Blocked"), RED)
-            } else {
-                (format!("{display_name} Allowed"), GREEN)
-            };
+        for category in categories {
+            let is_blocked = app.status.block_state.is_blocked(&category);
+            let tint = if is_blocked { RED } else { GREEN };
+            let display_name = category.label();
 
-            let button = egui::Button::new(RichText::new(label).size(14.0).strong())
+            let button = egui::Button::new(RichText::new(display_name).size(14.0).strong())
                 .corner_radius(egui::CornerRadius::same(10))
                 .fill(tint.gamma_multiply(0.20))
                 .stroke((1.5, tint));
