@@ -5,7 +5,7 @@
 //! to embedded compile-time VRChat config.
 //!
 //! Domain blocking is enforced via the DNS shield (`liblvr_dns_shield.so`) and
-//! yt-dlp stub; the legacy Proton prefix hosts file is no longer used.
+//! yt-dlp stub.
 
 use std::collections::BTreeMap;
 use std::fs;
@@ -89,29 +89,17 @@ impl BlockCategory {
 
     pub fn from_tag(tag: &str) -> Option<Self> {
         let tag = tag.trim();
-        // Support new format: "# DO NOT EDIT LVR_<name> BEGIN"
+        // Format: "# DO NOT EDIT LVR_<name> BEGIN"
         if let Some(rest) = tag.strip_prefix("# DO NOT EDIT LVR_")
             && let Some(name) = rest.strip_suffix(" BEGIN")
         {
             return Some(Self::from_name(name));
         }
-        // Support legacy format: "# ----- BEGIN LVR <NAME> BLOCK -----"
-        if let Some(rest) = tag.strip_prefix("# ----- BEGIN LVR ")
-            && let Some(name) = rest.strip_suffix(" BLOCK -----")
-        {
-            return Some(match name {
-                "VIDEO" | "VIDEOS" => Self::Videos,
-                "IMAGE" | "IMAGES" => Self::Images,
-                "STRING" | "STRINGS" => Self::Strings,
-                "SHARED" | "REST" => Self::Shared,
-                custom => Self::Custom(custom.to_string()),
-            });
-        }
         None
     }
 }
 
-/// Compatibility wrapper for UI grids and summaries
+/// Wrapper for UI grids and domain summaries
 #[derive(Debug, Clone, Default)]
 pub struct DomainLists {
     pub domains: BTreeMap<String, Vec<String>>,
@@ -478,23 +466,15 @@ mod tests {
             assert_eq!(parsed, Some(cat));
         }
 
-        // Verify backward compatibility for legacy LVR_Video tag
+        // LVR_Video (singular) maps to Videos
         assert_eq!(
             BlockCategory::from_tag("# DO NOT EDIT LVR_Video BEGIN"),
             Some(BlockCategory::Videos)
         );
-        assert_eq!(
-            BlockCategory::from_tag("# ----- BEGIN LVR VIDEO BLOCK -----"),
-            Some(BlockCategory::Videos)
-        );
 
-        // Verify backward compatibility for legacy LVR_Rest tags
+        // LVR_Rest maps to Shared
         assert_eq!(
             BlockCategory::from_tag("# DO NOT EDIT LVR_Rest BEGIN"),
-            Some(BlockCategory::Shared)
-        );
-        assert_eq!(
-            BlockCategory::from_tag("# ----- BEGIN LVR REST BLOCK -----"),
             Some(BlockCategory::Shared)
         );
     }
