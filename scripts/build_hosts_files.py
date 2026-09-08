@@ -282,40 +282,22 @@ def main():
         summary[cat] = len(sorted_domains)
         print(f"Generated {file_path} ({len(sorted_domains)} base domains, {len(emitted_hosts)} hosts)")
 
-    # 8. Output assets/lists/all.json containing all blocklists in a single unified JSON
-    all_json_path = LISTS_DIR / "all.json"
-    all_json_data = {
-        "$schema": "./blocklist.schema.json",
-        "description": "Pre-filtered, mutually exclusive VRChat and community domain blocklists",
-        "categories": {},
+    # 8. Output assets/lists/domains.json containing all blocklists in a single flat JSON:
+    # {
+    #   "Analytics": [...],
+    #   "Video": [...]
+    # }
+    domains_json_path = LISTS_DIR / "domains.json"
+    domains_json_data = {
+        cat: sorted(set(final_categories[cat]))
+        for cat in sorted(final_categories.keys())
     }
 
-    for cat in sorted(final_categories.keys()):
-        hosts_file = HOSTS_OUT_DIR / f"{cat}.hosts"
-        category_hosts_lines = []
-        if hosts_file.exists():
-            with open(hosts_file, "r", encoding="utf-8") as f:
-                for line in f:
-                    line_str = line.strip()
-                    if line_str and not line_str.startswith("#"):
-                        category_hosts_lines.append(line_str)
-
-        all_json_data["categories"][cat] = {
-            "domains": sorted(set(final_categories[cat])),
-            "hosts_lines": category_hosts_lines,
-            "total_domains": len(final_categories[cat]),
-            "total_hosts": len(category_hosts_lines),
-        }
-
-    # Also include standard top-level arrays for direct drop-in category access
-    for cat, d_list in final_categories.items():
-        all_json_data[cat] = sorted(set(d_list))
-
-    with open(all_json_path, "w", encoding="utf-8") as f:
-        json.dump(all_json_data, f, indent=2)
+    with open(domains_json_path, "w", encoding="utf-8") as f:
+        json.dump(domains_json_data, f, indent=2)
         f.write("\n")
 
-    print(f"\nGenerated unified bundle at: {all_json_path} ({len(all_json_data['categories'])} categories)")
+    print(f"\nGenerated unified domains bundle at: {domains_json_path} ({len(domains_json_data)} categories)")
 
     print("\nPre-computed hosts files generated successfully:")
     for cat, count in summary.items():
