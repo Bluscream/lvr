@@ -555,7 +555,7 @@ mod tests {
         // 1. Write block for Video
         let mut builder = hostsfile::HostsBuilder::new(BlockCategory::Video.tag_name());
         let zero_ip: IpAddr = "0.0.0.0".parse().unwrap();
-        builder.add_hostnames(zero_ip, &["youtube.com", "twitch.tv"]);
+        builder.add_hostnames(zero_ip, ["youtube.com", "twitch.tv"]);
         builder.write_to(&hosts_path).unwrap();
 
         let content = fs::read_to_string(&hosts_path).unwrap();
