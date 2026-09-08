@@ -81,22 +81,6 @@ impl BlockCategory {
     pub fn short_label(&self) -> &str {
         self.label()
     }
-
-    /// Returns the tag name for this category (e.g. `LVR_Videos`).
-    pub fn tag_name(&self) -> String {
-        format!("LVR_{}", self.name())
-    }
-
-    pub fn from_tag(tag: &str) -> Option<Self> {
-        let tag = tag.trim();
-        // Format: "# DO NOT EDIT LVR_<name> BEGIN"
-        if let Some(rest) = tag.strip_prefix("# DO NOT EDIT LVR_")
-            && let Some(name) = rest.strip_suffix(" BEGIN")
-        {
-            return Some(Self::from_name(name));
-        }
-        None
-    }
 }
 
 /// Wrapper for UI grids and domain summaries
@@ -452,32 +436,7 @@ fn make_file_readonly(path: &Path) -> Result<()> {
 mod tests {
     use super::*;
 
-    #[test]
-    fn block_category_tag_roundtrip() {
-        for cat in [
-            BlockCategory::Videos,
-            BlockCategory::Images,
-            BlockCategory::Strings,
-            BlockCategory::Shared,
-            BlockCategory::Custom("Analytics".to_string()),
-        ] {
-            let tag_line = format!("# DO NOT EDIT {} BEGIN", cat.tag_name());
-            let parsed = BlockCategory::from_tag(&tag_line);
-            assert_eq!(parsed, Some(cat));
-        }
 
-        // LVR_Video (singular) maps to Videos
-        assert_eq!(
-            BlockCategory::from_tag("# DO NOT EDIT LVR_Video BEGIN"),
-            Some(BlockCategory::Videos)
-        );
-
-        // LVR_Rest maps to Shared
-        assert_eq!(
-            BlockCategory::from_tag("# DO NOT EDIT LVR_Rest BEGIN"),
-            Some(BlockCategory::Shared)
-        );
-    }
 
     #[test]
     fn embedded_vrchat_fallback_parses_cleanly() {

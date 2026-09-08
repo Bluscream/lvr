@@ -191,10 +191,10 @@ fn visit_rs_files(dir: &Path, cb: &mut impl FnMut(&Path, &str)) {
     for path in paths {
         if path.is_dir() {
             visit_rs_files(&path, cb);
-        } else if path.extension().is_some_and(|e| e == "rs") {
-            if let Ok(text) = fs::read_to_string(&path) {
-                cb(&path, &text);
-            }
+        } else if path.extension().is_some_and(|e| e == "rs")
+            && let Ok(text) = fs::read_to_string(&path)
+        {
+            cb(&path, &text);
         }
     }
 }
