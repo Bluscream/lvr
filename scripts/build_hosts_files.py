@@ -179,7 +179,7 @@ def main():
 
     # Ingest Official: ONLY urlList, imageHostUrlList, stringHostUrlList
     official_mappings = [
-        ("urlList", "Video"),
+        ("urlList", "Videos"),
         ("imageHostUrlList", "Images"),
         ("stringHostUrlList", "Strings"),
     ]
@@ -196,7 +196,7 @@ def main():
         if key.startswith("$") or not isinstance(val, list):
             continue
         if key in ("urlList", "Videos", "video", "videos"):
-            cat = "Video"
+            cat = "Videos"
         elif key in ("imageHostUrlList", "Images", "image", "images"):
             cat = "Images"
         elif key in ("stringHostUrlList", "Strings", "string", "strings"):
@@ -213,21 +213,11 @@ def main():
                     domains_by_cat[cat].add(cleaned)
                     domain_sources[canonical_domain_key(cleaned)].add("Community")
 
-    # 6. Expand wildcard domains (*.domain.tld -> domain.tld + www.domain.tld)
+    # 6. Preserve wildcards as first-class entries (do NOT force-expand to www.)
     expanded_domains_by_cat = defaultdict(set)
     for cat, d_set in domains_by_cat.items():
         for d in d_set:
-            if d.startswith("*."):
-                bare = d.lstrip("*.")
-                if bare and bare != "localhost":
-                    expanded_domains_by_cat[cat].add(bare)
-                    expanded_domains_by_cat[cat].add(f"www.{bare}")
-                    # Inherit sources
-                    srcs = domain_sources.get(canonical_domain_key(d), set())
-                    domain_sources[canonical_domain_key(bare)].update(srcs)
-                    domain_sources[canonical_domain_key(f"www.{bare}")].update(srcs)
-            else:
-                expanded_domains_by_cat[cat].add(d)
+            expanded_domains_by_cat[cat].add(d)
 
     # 7. Enforce Category Mutual Exclusivity
     # Any canonical key present in >= 2 categories moves to "Shared"

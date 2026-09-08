@@ -54,12 +54,12 @@ pub fn compact_button(ui: &mut Ui, label: &str, tint: Option<Color32>, width: f3
 }
 
 /// Coloured status chip, e.g. "WiVRn: running".
-pub fn pill(ui: &mut Ui, label: &str, value: &str, color: Color32) {
-    pill_sized(ui, label, value, color, 0.0);
+pub fn pill(ui: &mut Ui, label: &str, value: &str, color: Color32) -> Response {
+    pill_sized(ui, label, value, color, 0.0)
 }
 
 /// Coloured status chip with target width to prevent horizontal squeezing or overflow.
-pub fn pill_sized(ui: &mut Ui, label: &str, value: &str, color: Color32, width: f32) {
+pub fn pill_sized(ui: &mut Ui, label: &str, value: &str, color: Color32, width: f32) -> Response {
     let frame = egui::Frame::new()
         .fill(color.gamma_multiply(0.16))
         .stroke((1.0, color.gamma_multiply(0.8)))
@@ -73,7 +73,7 @@ pub fn pill_sized(ui: &mut Ui, label: &str, value: &str, color: Color32, width: 
                 ui.label(RichText::new(label).size(11.0).color(GREY));
                 ui.label(RichText::new(value).size(15.0).strong().color(color));
             });
-        });
+        }).response
     } else {
         let galley_font_label = egui::FontId::new(11.0, egui::FontFamily::Proportional);
         let galley_font_val = egui::FontId::new(15.0, egui::FontFamily::Proportional);
@@ -89,14 +89,19 @@ pub fn pill_sized(ui: &mut Ui, label: &str, value: &str, color: Color32, width: 
         let pill_w = content_w + pad_x * 2.0;
         let pill_h = label_galley.size().y + item_gap + value_galley.size().y + pad_y * 2.0;
 
-        let (rect, _response) = ui.allocate_exact_size(egui::vec2(pill_w, pill_h), egui::Sense::hover());
+        let (rect, response) = ui.allocate_exact_size(egui::vec2(pill_w, pill_h), egui::Sense::click());
 
         if ui.is_rect_visible(rect) {
             let painter = ui.painter();
+            let bg_tint = if response.hovered() {
+                color.gamma_multiply(0.26)
+            } else {
+                color.gamma_multiply(0.16)
+            };
             painter.rect(
                 rect,
                 CornerRadius::same(10),
-                color.gamma_multiply(0.16),
+                bg_tint,
                 egui::Stroke::new(1.0, color.gamma_multiply(0.8)),
                 egui::StrokeKind::Inside,
             );
@@ -110,6 +115,8 @@ pub fn pill_sized(ui: &mut Ui, label: &str, value: &str, color: Color32, width: 
             );
             painter.galley(val_pos, value_galley, color);
         }
+
+        response
     }
 }
 

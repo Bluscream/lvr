@@ -251,7 +251,13 @@ impl LvrApp {
                     } else {
                         (widgets::GREY, "WIVRN OFFLINE")
                     };
-                    ui.label(RichText::new(text).size(13.0).strong().color(color));
+                    let btn = egui::Button::new(RichText::new(text).size(13.0).strong().color(color))
+                        .corner_radius(egui::CornerRadius::same(6))
+                        .fill(color.gamma_multiply(0.12))
+                        .stroke((1.0, color.gamma_multiply(0.4)));
+                    if ui.add(btn).on_hover_text("Click to refresh status, domain lists, and prefix state").clicked() {
+                        self.shared.send(Command::ReloadAll);
+                    }
                 });
             }
         });

@@ -130,7 +130,7 @@ pub fn parse_vrchat_config_to_categories(json_str: &str) -> Result<BTreeMap<Stri
 
     // 2. Extract domains for the three official categories
     let mappings = [
-        ("urlList", "Video"),
+        ("urlList", "Videos"),
         ("imageHostUrlList", "Images"),
         ("stringHostUrlList", "Strings"),
     ];
@@ -151,22 +151,10 @@ pub fn parse_vrchat_config_to_categories(json_str: &str) -> Result<BTreeMap<Stri
         domains_by_cat.insert(cat, set);
     }
 
-    // 3. Expand wildcard domains (*.domain.tld -> domain.tld + www.domain.tld)
+    // 3. Preserve wildcards as first-class entries (do NOT force-expand to www.)
     let mut expanded_by_cat: BTreeMap<&str, HashSet<String>> = BTreeMap::new();
     for (cat, d_set) in domains_by_cat {
-        let mut expanded = HashSet::new();
-        for d in d_set {
-            if d.starts_with("*.") {
-                let bare = d.trim_start_matches("*.");
-                if !bare.is_empty() && bare != "localhost" {
-                    expanded.insert(bare.to_string());
-                    expanded.insert(format!("www.{bare}"));
-                }
-            } else {
-                expanded.insert(d);
-            }
-        }
-        expanded_by_cat.insert(cat, expanded);
+        expanded_by_cat.insert(cat, d_set);
     }
 
     // 4. Mutual Exclusivity: Move any domain in >= 2 categories to "Shared"

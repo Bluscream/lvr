@@ -60,7 +60,12 @@ fn render_telemetry_hud(app: &LvrApp, ui: &mut Ui) {
         } else {
             ("Stopped", GREY)
         };
-        widgets::pill(ui, "WiVRn Server", wivrn_text, wivrn_color);
+        if widgets::pill(ui, "WiVRn Server", wivrn_text, wivrn_color)
+            .on_hover_text("Click to refresh status and recheck domain shields")
+            .clicked()
+        {
+            app.send(Command::ReloadAll);
+        }
 
         // Headset: Model name when connected, or Disconnected
         let (headset_text, headset_color) = if app.status.headset_connected {

@@ -35,7 +35,7 @@ static ACTIVE_DOMAIN_MAP: RwLock<Option<Arc<DomainMap>>> = RwLock::new(None);
 /// Represents the toggleable blocking categories.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
 pub enum BlockCategory {
-    Video,
+    Videos,
     Images,
     Strings,
     Shared,
@@ -45,7 +45,7 @@ pub enum BlockCategory {
 impl BlockCategory {
     pub fn name(&self) -> &str {
         match self {
-            Self::Video => "Video",
+            Self::Videos => "Videos",
             Self::Images => "Images",
             Self::Strings => "Strings",
             Self::Shared => "Shared",
@@ -54,28 +54,22 @@ impl BlockCategory {
     }
 
     pub fn from_name(name: &str) -> Self {
-        match name {
-            "Video" => Self::Video,
-            "Images" => Self::Images,
-            "Strings" => Self::Strings,
-            "Shared" | "Rest" => Self::Shared,
-            custom => Self::Custom(custom.to_string()),
+        if name.eq_ignore_ascii_case("Videos") || name.eq_ignore_ascii_case("Video") {
+            Self::Videos
+        } else if name.eq_ignore_ascii_case("Images") || name.eq_ignore_ascii_case("Image") {
+            Self::Images
+        } else if name.eq_ignore_ascii_case("Strings") || name.eq_ignore_ascii_case("String") {
+            Self::Strings
+        } else if name.eq_ignore_ascii_case("Shared") || name.eq_ignore_ascii_case("Rest") {
+            Self::Shared
+        } else {
+            Self::Custom(name.to_string())
         }
     }
 
     pub fn label(&self) -> &str {
         match self {
-            Self::Video => "Video Players",
-            Self::Images => "Image Loading",
-            Self::Strings => "String Loading",
-            Self::Shared => "Shared & Rest",
-            Self::Custom(name) => name.as_str(),
-        }
-    }
-
-    pub fn short_label(&self) -> &str {
-        match self {
-            Self::Video => "Video",
+            Self::Videos => "Videos",
             Self::Images => "Images",
             Self::Strings => "Strings",
             Self::Shared => "Shared",
@@ -83,7 +77,11 @@ impl BlockCategory {
         }
     }
 
-    /// Returns the tag used by `hostsfile::HostsBuilder` (e.g. `LVR_Video`).
+    pub fn short_label(&self) -> &str {
+        self.label()
+    }
+
+    /// Returns the tag used by `hostsfile::HostsBuilder` (e.g. `LVR_Videos`).
     pub fn tag_name(&self) -> String {
         format!("LVR_{}", self.name())
     }
@@ -101,9 +99,9 @@ impl BlockCategory {
             && let Some(name) = rest.strip_suffix(" BLOCK -----")
         {
             return Some(match name {
-                "VIDEO" => Self::Video,
-                "IMAGES" => Self::Images,
-                "STRINGS" => Self::Strings,
+                "VIDEO" | "VIDEOS" => Self::Videos,
+                "IMAGE" | "IMAGES" => Self::Images,
+                "STRING" | "STRINGS" => Self::Strings,
                 "SHARED" | "REST" => Self::Shared,
                 custom => Self::Custom(custom.to_string()),
             });
@@ -124,8 +122,8 @@ impl DomainLists {
         for key in self.domains.keys() {
             cats.push(BlockCategory::from_name(key));
         }
-        if !cats.iter().any(|c| matches!(c, BlockCategory::Video)) {
-            cats.push(BlockCategory::Video);
+        if !cats.iter().any(|c| matches!(c, BlockCategory::Videos)) {
+            cats.push(BlockCategory::Videos);
         }
         if !cats.iter().any(|c| matches!(c, BlockCategory::Images)) {
             cats.push(BlockCategory::Images);
@@ -143,6 +141,11 @@ impl DomainLists {
 
     pub fn count_for_category(&self, cat: &BlockCategory) -> usize {
         if let Some(v) = self.domains.get(cat.name()) {
+            return v.len();
+        }
+        if matches!(cat, BlockCategory::Videos)
+            && let Some(v) = self.domains.get("Video")
+        {
             return v.len();
         }
         if matches!(cat, BlockCategory::Shared)
@@ -171,7 +174,7 @@ pub struct BlockState {
 impl BlockState {
     pub fn is_blocked(&self, category: &BlockCategory) -> bool {
         match category {
-            BlockCategory::Video => self.video_blocked,
+            BlockCategory::Videos => self.video_blocked,
             BlockCategory::Images => self.image_blocked,
             BlockCategory::Strings => self.string_blocked,
             BlockCategory::Shared => self.shared_blocked,
@@ -183,7 +186,7 @@ impl BlockState {
 
     pub fn set_blocked(&mut self, category: &BlockCategory, blocked: bool) {
         match category {
-            BlockCategory::Video => self.video_blocked = blocked,
+            BlockCategory::Videos => self.video_blocked = blocked,
             BlockCategory::Images => self.image_blocked = blocked,
             BlockCategory::Strings => self.string_blocked = blocked,
             BlockCategory::Shared => self.shared_blocked = blocked,
@@ -553,7 +556,7 @@ mod tests {
     #[test]
     fn block_category_tag_roundtrip() {
         for cat in [
-            BlockCategory::Video,
+            BlockCategory::Videos,
             BlockCategory::Images,
             BlockCategory::Strings,
             BlockCategory::Shared,
@@ -563,6 +566,16 @@ mod tests {
             let parsed = BlockCategory::from_tag(&tag_line);
             assert_eq!(parsed, Some(cat));
         }
+
+        // Verify backward compatibility for legacy LVR_Video tag
+        assert_eq!(
+            BlockCategory::from_tag("# DO NOT EDIT LVR_Video BEGIN"),
+            Some(BlockCategory::Videos)
+        );
+        assert_eq!(
+            BlockCategory::from_tag("# ----- BEGIN LVR VIDEO BLOCK -----"),
+            Some(BlockCategory::Videos)
+        );
 
         // Verify backward compatibility for legacy LVR_Rest tags
         assert_eq!(
@@ -578,7 +591,7 @@ mod tests {
     #[test]
     fn embedded_vrchat_fallback_parses_cleanly() {
         let parsed = vrchat_config::get_embedded_fallback_categories();
-        assert!(parsed.contains_key("Video"));
+        assert!(parsed.contains_key("Videos"));
         assert!(parsed.contains_key("Images"));
         assert!(parsed.contains_key("Strings"));
         assert!(parsed.contains_key("Shared"));
@@ -593,23 +606,23 @@ mod tests {
         let hosts_path = temp_dir.join("hosts");
         fs::write(&hosts_path, "127.0.0.1 localhost\n::1 localhost\n").unwrap();
 
-        // 1. Write block for Video
-        let mut builder = hostsfile::HostsBuilder::new(BlockCategory::Video.tag_name());
+        // 1. Write block for Videos
+        let mut builder = hostsfile::HostsBuilder::new(BlockCategory::Videos.tag_name());
         let zero_ip: IpAddr = "0.0.0.0".parse().unwrap();
         builder.add_hostnames(zero_ip, ["youtube.com", "twitch.tv"]);
         builder.write_to(&hosts_path).unwrap();
 
         let content = fs::read_to_string(&hosts_path).unwrap();
-        assert!(content.contains("# DO NOT EDIT LVR_Video BEGIN"));
+        assert!(content.contains("# DO NOT EDIT LVR_Videos BEGIN"));
         assert!(content.contains("0.0.0.0 youtube.com twitch.tv"));
-        assert!(content.contains("# DO NOT EDIT LVR_Video END"));
+        assert!(content.contains("# DO NOT EDIT LVR_Videos END"));
 
-        // 2. Clear block for Video (empty builder)
-        let empty_builder = hostsfile::HostsBuilder::new(BlockCategory::Video.tag_name());
+        // 2. Clear block for Videos (empty builder)
+        let empty_builder = hostsfile::HostsBuilder::new(BlockCategory::Videos.tag_name());
         empty_builder.write_to(&hosts_path).unwrap();
 
         let cleared_content = fs::read_to_string(&hosts_path).unwrap();
-        assert!(!cleared_content.contains("LVR_Video"));
+        assert!(!cleared_content.contains("LVR_Videos"));
         assert!(!cleared_content.contains("youtube.com"));
 
         let _ = fs::remove_dir_all(&temp_dir);
@@ -619,7 +632,7 @@ mod tests {
     fn sanitize_domain_map_strips_ip_addresses() {
         let mut raw = BTreeMap::new();
         raw.insert(
-            "Video".to_string(),
+            "Videos".to_string(),
             vec![
                 "youtube.com".to_string(),
                 "127.0.0.1".to_string(),
@@ -634,7 +647,7 @@ mod tests {
         );
 
         let sanitized = sanitize_domain_map(raw);
-        let video = sanitized.get("Video").unwrap();
+        let video = sanitized.get("Videos").unwrap();
         assert_eq!(video, &["youtube.com", "*.twitch.tv"]);
     }
 }

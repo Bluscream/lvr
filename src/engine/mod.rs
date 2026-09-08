@@ -173,13 +173,39 @@ impl Engine {
                 }
                 self.shared.info(format!(
                     "Updated active domain lists: {} videos, {} images, {} strings, {} shared (total: {})",
-                    lists.count_for_category(&crate::domain_block::BlockCategory::Video),
+                    lists.count_for_category(&crate::domain_block::BlockCategory::Videos),
+                    lists.count_for_category(&crate::domain_block::BlockCategory::Images),
+                    lists.count_for_category(&crate::domain_block::BlockCategory::Strings),
+                    lists.count_for_category(&crate::domain_block::BlockCategory::Shared),
+                    lists.total_count()
+                ));
+            }
+            Command::ReloadAll => {
+                // Clear all throttling timestamps
+                self.last_device_poll = None;
+                self.last_audio_poll = None;
+                self.last_media_block_poll = None;
+
+                // Re-read prefix block state immediately
+                if let Some(prefix) = crate::domain_block::detect_vrc_prefix("") {
+                    self.block_state = crate::domain_block::read_block_state(&prefix);
+                }
+
+                // Reload domains
+                let domain_cfg = self.shared.config().domain_block.clone();
+                let lists = crate::domain_block::reload_domain_lists_with_config(&domain_cfg).await;
+
+                self.shared.info(format!(
+                    "Reloaded state & domains: {} videos, {} images, {} strings, {} shared (total: {})",
+                    lists.count_for_category(&crate::domain_block::BlockCategory::Videos),
                     lists.count_for_category(&crate::domain_block::BlockCategory::Images),
                     lists.count_for_category(&crate::domain_block::BlockCategory::Strings),
                     lists.count_for_category(&crate::domain_block::BlockCategory::Shared),
                     lists.total_count()
                 ));
 
+                // Immediately run a tick to refresh status
+                self.tick().await;
             }
             Command::CreateVirtualDisplay => {
                 self.pending_virtual_display_action = None;

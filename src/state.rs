@@ -32,10 +32,12 @@ pub enum Command {
     CreateVirtualDisplay,
     /// Remove/disable virtual display manually or on trigger.
     RemoveVirtualDisplay,
-    /// Toggle media/domain blocking for a specific category (Video, Images, Strings, Shared).
+    /// Toggle media/domain blocking for a specific category (Videos, Images, Strings, Shared).
     ToggleBlockCategory(crate::domain_block::BlockCategory),
     /// Reload or update active domain lists (e.g. after community blocklists toggle).
     ReloadDomainLists,
+    /// Refresh all state (polls, domain lists, prefix hosts file blocks, WiVRn).
+    ReloadAll,
     Quit,
 }
 
