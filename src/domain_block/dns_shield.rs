@@ -61,13 +61,10 @@ pub fn sync_shield_rules(state: &BlockState) -> Result<()> {
     let lists = active_domains();
     let mut blocked_rules = Vec::new();
 
-    // Iterate the raw map so we use the actual stored key (e.g. "Video" or
-    // "Videos") and convert it to a BlockCategory for the is_blocked check.
-    // This avoids a key mismatch where cat.name() returns "Videos" but the
-    // VRChat remote config stores the list under "Video" (singular).
-    for (key, domains) in &lists.domains {
-        let cat = crate::domain_block::BlockCategory::from_name(key);
-        if state.is_blocked(&cat) {
+    for cat in lists.all_categories() {
+        if state.is_blocked(&cat)
+            && let Some(domains) = lists.domains.get(cat.name())
+        {
             for d in domains {
                 let trimmed = d.trim().to_lowercase();
                 if !trimmed.is_empty() {

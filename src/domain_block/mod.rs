@@ -113,20 +113,7 @@ impl DomainLists {
     }
 
     pub fn count_for_category(&self, cat: &BlockCategory) -> usize {
-        if let Some(v) = self.domains.get(cat.name()) {
-            return v.len();
-        }
-        if matches!(cat, BlockCategory::Videos)
-            && let Some(v) = self.domains.get("Video")
-        {
-            return v.len();
-        }
-        if matches!(cat, BlockCategory::Shared)
-            && let Some(v) = self.domains.get("Rest")
-        {
-            return v.len();
-        }
-        0
+        self.domains.get(cat.name()).map_or(0, |v| v.len())
     }
 
     pub fn total_count(&self) -> usize {
