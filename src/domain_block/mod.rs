@@ -55,16 +55,12 @@ impl BlockCategory {
     }
 
     pub fn from_name(name: &str) -> Self {
-        if name.eq_ignore_ascii_case("Videos") || name.eq_ignore_ascii_case("Video") {
-            Self::Videos
-        } else if name.eq_ignore_ascii_case("Images") || name.eq_ignore_ascii_case("Image") {
-            Self::Images
-        } else if name.eq_ignore_ascii_case("Strings") || name.eq_ignore_ascii_case("String") {
-            Self::Strings
-        } else if name.eq_ignore_ascii_case("Shared") || name.eq_ignore_ascii_case("Rest") {
-            Self::Shared
-        } else {
-            Self::Custom(name.to_string())
+        match name {
+            "Videos"  => Self::Videos,
+            "Images"  => Self::Images,
+            "Strings" => Self::Strings,
+            "Shared"  => Self::Shared,
+            other     => Self::Custom(other.to_string()),
         }
     }
 
