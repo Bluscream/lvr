@@ -351,16 +351,20 @@ fn vrc_files_and_tools(app: &mut LvrApp, ui: &mut Ui) {
 
     let lists = crate::domain_block::active_domains();
     ui.add_space(6.0);
-    ui.label(RichText::new("Domains blocked:").strong());
+    ui.label(RichText::new("Domains summary:").strong());
     ui.add_space(3.0);
-    render_domains_blocked_grid(ui, &lists);
+    render_domains_blocked_grid(ui, &lists, &app.status.block_state);
     ui.add_space(8.0);
 
     let prefix_opt = crate::domain_block::detect_vrc_prefix("");
     render_vrc_prefix_section(ui, prefix_opt.as_deref());
 }
 
-fn render_domains_blocked_grid(ui: &mut Ui, lists: &crate::domain_block::DomainLists) {
+fn render_domains_blocked_grid(
+    ui: &mut Ui,
+    lists: &crate::domain_block::DomainLists,
+    block_state: &crate::domain_block::BlockState,
+) {
     let categories = lists.all_categories();
     let num_columns = 1 + categories.len() + 1;
 
@@ -371,19 +375,43 @@ fn render_domains_blocked_grid(ui: &mut Ui, lists: &crate::domain_block::DomainL
         .min_col_width(60.0)
         .show(ui, |ui| {
             // Header row
-            ui.label(RichText::new("List").strong());
+            ui.label(RichText::new("Status").strong());
             for cat in &categories {
                 ui.label(RichText::new(cat.short_label()).strong());
             }
             ui.label(RichText::new("Total").strong());
             ui.end_row();
 
-            // Row with category counts
-            ui.label(RichText::new("Pre-compiled").strong());
+            // Row 1: Total Loaded / Available domains
+            ui.label(RichText::new("Loaded").strong());
             for cat in &categories {
                 ui.label(lists.count_for_category(cat).to_string());
             }
-            ui.label(RichText::new(lists.total_count().to_string()).strong().color(GREEN));
+            ui.label(RichText::new(lists.total_count().to_string()).strong().color(BLUE));
+            ui.end_row();
+
+            // Row 2: Actually Blocked domains right now
+            ui.label(RichText::new("Blocked").strong());
+            let mut total_blocked = 0usize;
+            for cat in &categories {
+                let is_blocked = block_state.is_blocked(cat);
+                let count = if is_blocked {
+                    lists.count_for_category(cat)
+                } else {
+                    0
+                };
+                total_blocked += count;
+
+                let (text, color) = if is_blocked {
+                    (count.to_string(), super::widgets::RED)
+                } else {
+                    ("0".to_string(), GREY)
+                };
+                ui.label(RichText::new(text).color(color));
+            }
+
+            let total_color = if total_blocked > 0 { super::widgets::RED } else { GREY };
+            ui.label(RichText::new(total_blocked.to_string()).strong().color(total_color));
             ui.end_row();
         });
 }
