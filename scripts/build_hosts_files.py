@@ -257,6 +257,8 @@ def main():
         # Sort domains
         sorted_domains = sorted(set(d_list))
         for d in sorted_domains:
+            # If the entry starts with *. (e.g. *.facebook.com), strip *. and write normal domain (facebook.com).
+            # Only include www. if the source entry actually had www. in front (e.g. www.facebook.com).
             bare = d.lstrip("*.")
             if not bare or bare == "localhost":
                 continue
@@ -265,19 +267,13 @@ def main():
             if len(parts) == 4 and all(p.isdigit() and 0 <= int(p) <= 255 for p in parts):
                 continue
 
-            base = bare[4:] if bare.startswith("www.") and "." in bare[4:] else bare
-            sources = sorted(domain_sources.get(canonical_domain_key(base), ["Community"]))
+            sources = sorted(domain_sources.get(canonical_domain_key(bare), ["Community"]))
             comment = f"  # {', '.join(sources)}" if sources else ""
 
-            base_lower = base.lower()
-            if base_lower not in emitted_hosts:
-                emitted_hosts.add(base_lower)
-                lines.append(f"0.0.0.0 {base_lower}{comment}")
-
-            www_lower = f"www.{base_lower}"
-            if www_lower not in emitted_hosts:
-                emitted_hosts.add(www_lower)
-                lines.append(f"0.0.0.0 {www_lower}{comment}")
+            host_lower = bare.lower()
+            if host_lower not in emitted_hosts:
+                emitted_hosts.add(host_lower)
+                lines.append(f"0.0.0.0 {host_lower}{comment}")
 
         with open(file_path, "w", encoding="utf-8") as f:
             f.write("\n".join(lines))
