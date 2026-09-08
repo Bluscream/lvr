@@ -303,19 +303,54 @@ fn vrc_files_and_tools(app: &mut LvrApp, ui: &mut Ui) {
         });
 
     let lists = crate::domain_block::active_domains();
-    ui.add_space(2.0);
-    ui.label(
-        RichText::new(format!(
-            "Active blocklist domains: {} video · {} image · {} string · {} shared (rest)",
-            lists.video_domains.len(),
-            lists.image_domains.len(),
-            lists.string_domains.len(),
-            lists.rest_domains.len()
-        ))
-        .size(11.0)
-        .color(GREY),
-    );
     ui.add_space(6.0);
+    ui.label(RichText::new("Domains blocked:").strong());
+    ui.add_space(3.0);
+
+    egui::Grid::new("settings-domains-blocked-grid")
+        .striped(true)
+        .num_columns(6)
+        .spacing([24.0, 6.0])
+        .min_col_width(60.0)
+        .show(ui, |ui| {
+            // Header row
+            ui.label(RichText::new("List").strong());
+            ui.label(RichText::new("Video").strong());
+            ui.label(RichText::new("Image").strong());
+            ui.label(RichText::new("String").strong());
+            ui.label(RichText::new("Rest").strong());
+            ui.label(RichText::new("Total").strong());
+            ui.end_row();
+
+            // Stats per list
+            for stat in &lists.list_stats {
+                ui.label(RichText::new(&stat.name).strong());
+                if stat.enabled {
+                    ui.label(stat.counts.video.to_string());
+                    ui.label(stat.counts.image.to_string());
+                    ui.label(stat.counts.string.to_string());
+                    ui.label(stat.counts.rest.to_string());
+                    ui.label(RichText::new(stat.counts.total().to_string()).strong());
+                } else {
+                    ui.label("-");
+                    ui.label("-");
+                    ui.label("-");
+                    ui.label("-");
+                    ui.label(RichText::new("disabled").color(GREY));
+                }
+                ui.end_row();
+            }
+
+            // Total row
+            ui.label(RichText::new("Total").strong());
+            ui.label(RichText::new(lists.total_counts.video.to_string()).strong());
+            ui.label(RichText::new(lists.total_counts.image.to_string()).strong());
+            ui.label(RichText::new(lists.total_counts.string.to_string()).strong());
+            ui.label(RichText::new(lists.total_counts.rest.to_string()).strong());
+            ui.label(RichText::new(lists.total_counts.total().to_string()).strong().color(GREEN));
+            ui.end_row();
+        });
+    ui.add_space(8.0);
 
     let prefix_opt = crate::domain_block::detect_vrc_prefix("");
 

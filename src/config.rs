@@ -397,17 +397,43 @@ impl Default for VirtualDisplayConfig {
     }
 }
 
+fn default_true() -> bool {
+    true
+}
+
+/// A configured community blocklist source in the standard VRChat config JSON format.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CommunityBlocklistSource {
+    pub id: String,
+    pub name: String,
+    pub url: String,
+    #[serde(default = "default_true")]
+    pub enabled: bool,
+}
+
+pub fn default_community_sources() -> Vec<CommunityBlocklistSource> {
+    vec![CommunityBlocklistSource {
+        id: "bluscream".to_string(),
+        name: "Community".to_string(),
+        url: "https://github.com/Bluscream/lvr/raw/refs/heads/main/assets/lists/config.json".to_string(),
+        enabled: true,
+    }]
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct DomainBlockConfig {
     /// Merge community-sourced blocklists into active domain lists.
     pub load_community_blocklists: bool,
+    /// Configured community blocklist sources.
+    pub community_sources: Vec<CommunityBlocklistSource>,
 }
 
 impl Default for DomainBlockConfig {
     fn default() -> Self {
         Self {
             load_community_blocklists: true,
+            community_sources: default_community_sources(),
         }
     }
 }

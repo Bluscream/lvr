@@ -36,8 +36,40 @@ use std::sync::{Arc, RwLock};
 const EMBEDDED_FALLBACK_CONFIG: &str = include_str!("../assets/vrchat_config_fallback.json");
 
 /// Remote URL for community blocklists extracted from community sources and logs.
+#[allow(dead_code)]
 pub const COMMUNITY_CONFIG_URL: &str =
     "https://github.com/Bluscream/lvr/raw/refs/heads/main/assets/lists/config.json";
+
+/// Detailed domain counts per category.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct CategoryCounts {
+    pub video: usize,
+    pub image: usize,
+    pub string: usize,
+    pub rest: usize,
+}
+
+impl CategoryCounts {
+    pub fn total(&self) -> usize {
+        self.video + self.image + self.string + self.rest
+    }
+}
+
+/// Statistics for a specific blocklist source (Official or Community).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BlocklistStats {
+    pub name: String,
+    pub counts: CategoryCounts,
+    pub enabled: bool,
+}
+
+/// Raw JSON blocklist payload with metadata.
+#[derive(Debug, Clone)]
+pub struct RawBlocklistInput {
+    pub name: String,
+    pub json: String,
+    pub enabled: bool,
+}
 
 /// Dynamic or fallback domain store for all categories.
 #[derive(Debug, Clone)]
@@ -48,11 +80,14 @@ pub struct DomainLists {
     pub rest_domains: Vec<String>,
     #[allow(dead_code)]
     pub protected_domains: Vec<String>,
+    pub list_stats: Vec<BlocklistStats>,
+    pub total_counts: CategoryCounts,
 }
 
 static ACTIVE_DOMAIN_LISTS: RwLock<Option<Arc<DomainLists>>> = RwLock::new(None);
 static LATEST_VRC_CONFIG_JSON: RwLock<Option<String>> = RwLock::new(None);
 static LATEST_COMMUNITY_CONFIG_JSON: RwLock<Option<String>> = RwLock::new(None);
+static LATEST_COMMUNITY_LISTS: RwLock<Vec<RawBlocklistInput>> = RwLock::new(Vec::new());
 static LOAD_COMMUNITY_ENABLED: AtomicBool = AtomicBool::new(true);
 
 /// Maximum age for the local cached community blocklist before redownloading (1 hour).
@@ -63,6 +98,17 @@ pub fn community_cache_path() -> PathBuf {
     directories::ProjectDirs::from("", "", "lvr")
         .map(|dirs| dirs.cache_dir().join("community_config.json"))
         .unwrap_or_else(|| PathBuf::from("assets/lists/config.json"))
+}
+
+/// Primary file path where a specific community blocklist JSON is cached.
+pub fn community_cache_path_for_id(id: &str) -> PathBuf {
+    if id == "bluscream" || id == "default" {
+        community_cache_path()
+    } else if let Some(dirs) = directories::ProjectDirs::from("", "", "lvr") {
+        dirs.cache_dir().join(format!("community_{id}.json"))
+    } else {
+        PathBuf::from(format!("assets/lists/config_{id}.json"))
+    }
 }
 
 /// Checks whether a file exists and is less than the given maximum age.
@@ -128,62 +174,106 @@ pub fn get_fresh_local_community_config() -> Option<String> {
     None
 }
 
-/// Unconditionally downloads the community config JSON from GitHub and saves it to local cache.
-pub async fn fetch_community_config_remote() -> Result<String> {
+/// Checks whether a local community config file exists and is fresh (< 1h) for a specific source.
+pub fn get_fresh_local_community_config_for_source(
+    source: &crate::config::CommunityBlocklistSource,
+) -> Option<String> {
+    if source.id == "bluscream" || source.id == "default" {
+        return get_fresh_local_community_config();
+    }
+    let path = community_cache_path_for_id(&source.id);
+    if is_file_fresh(&path, COMMUNITY_CACHE_MAX_AGE) {
+        if let Ok(content) = fs::read_to_string(&path) {
+            if !content.trim().is_empty() {
+                return Some(content);
+            }
+        }
+    }
+    None
+}
+
+/// Unconditionally downloads text from a remote HTTP URL or reads from local file path.
+pub async fn fetch_remote_url(url: &str) -> Result<String> {
+    if let Some(file_path) = url.strip_prefix("file://") {
+        return Ok(fs::read_to_string(file_path)?);
+    }
+    if url.starts_with('/') {
+        return Ok(fs::read_to_string(url)?);
+    }
     let client = reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(8))
         .user_agent("lvr/0.1.0")
         .build()?;
 
-    let response = client
-        .get(COMMUNITY_CONFIG_URL)
-        .send()
-        .await?;
-
+    let response = client.get(url).send().await?;
     if !response.status().is_success() {
-        anyhow::bail!("Community config request failed with HTTP status {}", response.status());
+        anyhow::bail!("Request to {} failed with HTTP status {}", url, response.status());
     }
-
-    let text = response.text().await?;
-
-    // Save to local cache path
-    let cache_path = community_cache_path();
-    if let Some(parent) = cache_path.parent() {
-        let _ = fs::create_dir_all(parent);
-    }
-    if let Err(e) = fs::write(&cache_path, &text) {
-        tracing::warn!("Failed to save community config cache to {}: {e}", cache_path.display());
-    } else {
-        tracing::info!("Saved fresh community config to {}", cache_path.display());
-    }
-
-    Ok(text)
+    Ok(response.text().await?)
 }
 
-/// Fetches the community config JSON, redownloading only if the local file is missing or over 1 hour old.
-pub async fn fetch_community_config() -> Result<String> {
-    // Check if we have a fresh local file (< 1 hour old)
-    if let Some(fresh_content) = get_fresh_local_community_config() {
-        return Ok(fresh_content);
+/// Fetches a community blocklist source from network or reads from local disk if fresh (< 1h).
+pub async fn fetch_community_source(
+    source: &crate::config::CommunityBlocklistSource,
+) -> Result<String> {
+    if let Some(fresh) = get_fresh_local_community_config_for_source(source) {
+        return Ok(fresh);
     }
 
-    tracing::info!("Local community config is missing or over 1h old; redownloading from {COMMUNITY_CONFIG_URL}");
-    match fetch_community_config_remote().await {
-        Ok(text) => Ok(text),
-        Err(err) => {
-            // Fall back to stale local file if available when network fails
-            if let Some((path, elapsed, stale_content)) = get_newest_local_community_file() {
-                tracing::warn!(
-                    "Failed to redownload community config ({err:#}); falling back to stale local file {} (age: {}s)",
-                    path.display(),
-                    elapsed.as_secs()
-                );
-                Ok(stale_content)
-            } else {
-                Err(err)
+    tracing::info!("Downloading community blocklist '{}' from {}", source.name, source.url);
+    match fetch_remote_url(&source.url).await {
+        Ok(text) => {
+            let cache_path = community_cache_path_for_id(&source.id);
+            if let Some(parent) = cache_path.parent() {
+                let _ = fs::create_dir_all(parent);
             }
+            if let Err(e) = fs::write(&cache_path, &text) {
+                tracing::warn!("Failed to save cache to {}: {e}", cache_path.display());
+            } else {
+                tracing::info!("Saved fresh cache to {}", cache_path.display());
+            }
+            Ok(text)
+        }
+        Err(err) => {
+            let cache_path = community_cache_path_for_id(&source.id);
+            if let Ok(stale) = fs::read_to_string(&cache_path) {
+                if !stale.trim().is_empty() {
+                    tracing::warn!("Failed to download '{}' ({err:#}); using stale cache", source.name);
+                    return Ok(stale);
+                }
+            }
+            if source.id == "bluscream" || source.id == "default" {
+                if let Some((_, _, stale)) = get_newest_local_community_file() {
+                    return Ok(stale);
+                }
+            }
+            Err(err)
         }
     }
+}
+
+/// Unconditionally downloads the primary community config JSON from GitHub and saves it to local cache.
+#[allow(dead_code)]
+pub async fn fetch_community_config_remote() -> Result<String> {
+    let source = crate::config::CommunityBlocklistSource {
+        id: "bluscream".to_string(),
+        name: "Community".to_string(),
+        url: COMMUNITY_CONFIG_URL.to_string(),
+        enabled: true,
+    };
+    fetch_remote_url(&source.url).await
+}
+
+/// Fetches the primary community config JSON, redownloading only if the local file is missing or over 1 hour old.
+#[allow(dead_code)]
+pub async fn fetch_community_config() -> Result<String> {
+    let source = crate::config::CommunityBlocklistSource {
+        id: "bluscream".to_string(),
+        name: "Community".to_string(),
+        url: COMMUNITY_CONFIG_URL.to_string(),
+        enabled: true,
+    };
+    fetch_community_source(&source).await
 }
 
 /// Returns the community config JSON from memory cache, local disk cache, or repository file if present.
@@ -217,24 +307,59 @@ pub fn active_domains() -> Arc<DomainLists> {
 }
 
 /// Rebuilds and updates `ACTIVE_DOMAIN_LISTS` dynamically (e.g. when toggling community blocklists).
+#[allow(dead_code)]
 pub async fn reload_domain_lists(load_community: bool) -> Arc<DomainLists> {
-    LOAD_COMMUNITY_ENABLED.store(load_community, Ordering::Relaxed);
-    let comm_json = if load_community {
-        match fetch_community_config().await {
+    let cfg = crate::config::DomainBlockConfig {
+        load_community_blocklists: load_community,
+        community_sources: crate::config::default_community_sources(),
+    };
+    reload_domain_lists_with_config(&cfg).await
+}
+
+/// Rebuilds and updates `ACTIVE_DOMAIN_LISTS` dynamically with a full configuration.
+pub async fn reload_domain_lists_with_config(
+    cfg: &crate::config::DomainBlockConfig,
+) -> Arc<DomainLists> {
+    LOAD_COMMUNITY_ENABLED.store(cfg.load_community_blocklists, Ordering::Relaxed);
+    let mut inputs = Vec::new();
+
+    for source in &cfg.community_sources {
+        if !cfg.load_community_blocklists || !source.enabled {
+            inputs.push(RawBlocklistInput {
+                name: source.name.clone(),
+                json: String::new(),
+                enabled: false,
+            });
+            continue;
+        }
+
+        match fetch_community_source(source).await {
             Ok(json) => {
-                if let Ok(mut guard) = LATEST_COMMUNITY_CONFIG_JSON.write() {
-                    *guard = Some(json.clone());
-                }
-                Some(json)
+                inputs.push(RawBlocklistInput {
+                    name: source.name.clone(),
+                    json,
+                    enabled: true,
+                });
             }
             Err(err) => {
-                tracing::warn!("Failed to fetch community config from {COMMUNITY_CONFIG_URL} ({err:#}); using cached if available");
-                get_community_config_json()
+                tracing::warn!("Failed to reload community list '{}': {err:#}", source.name);
+                inputs.push(RawBlocklistInput {
+                    name: source.name.clone(),
+                    json: String::new(),
+                    enabled: false,
+                });
             }
         }
-    } else {
-        None
-    };
+    }
+
+    if let Ok(mut guard) = LATEST_COMMUNITY_LISTS.write() {
+        *guard = inputs.clone();
+    }
+    if let Some(first) = inputs.iter().find(|i| i.enabled && !i.json.is_empty()) {
+        if let Ok(mut guard) = LATEST_COMMUNITY_CONFIG_JSON.write() {
+            *guard = Some(first.json.clone());
+        }
+    }
 
     let vrc_json = LATEST_VRC_CONFIG_JSON
         .read()
@@ -243,10 +368,10 @@ pub async fn reload_domain_lists(load_community: bool) -> Arc<DomainLists> {
 
     let lists = match vrc_json {
         Some(ref body) => {
-            parse_vrchat_and_community_config_json(body, comm_json.as_deref())
-                .unwrap_or_else(|_| build_domain_lists_fallback_with_community_json(comm_json.as_deref()))
+            parse_all_domain_lists(body, &inputs)
+                .unwrap_or_else(|_| build_domain_lists_fallback_with_inputs(&inputs))
         }
-        None => build_domain_lists_fallback_with_community_json(comm_json.as_deref()),
+        None => build_domain_lists_fallback_with_inputs(&inputs),
     };
 
     let arc = Arc::new(lists);
@@ -257,45 +382,80 @@ pub async fn reload_domain_lists(load_community: bool) -> Arc<DomainLists> {
 }
 
 /// Try to fetch live VRChat config and community config asynchronously and initialize active domain lists.
+#[allow(dead_code)]
 pub async fn init_from_remote_or_fallback(load_community: bool) {
-    LOAD_COMMUNITY_ENABLED.store(load_community, Ordering::Relaxed);
-    let comm_json = if load_community {
-        match fetch_community_config().await {
+    let cfg = crate::config::DomainBlockConfig {
+        load_community_blocklists: load_community,
+        community_sources: crate::config::default_community_sources(),
+    };
+    init_from_remote_or_fallback_with_config(&cfg).await;
+}
+
+/// Try to fetch live VRChat config and all community configs asynchronously with a full configuration.
+pub async fn init_from_remote_or_fallback_with_config(
+    cfg: &crate::config::DomainBlockConfig,
+) {
+    LOAD_COMMUNITY_ENABLED.store(cfg.load_community_blocklists, Ordering::Relaxed);
+    let mut inputs = Vec::new();
+
+    for source in &cfg.community_sources {
+        if !cfg.load_community_blocklists || !source.enabled {
+            inputs.push(RawBlocklistInput {
+                name: source.name.clone(),
+                json: String::new(),
+                enabled: false,
+            });
+            continue;
+        }
+
+        match fetch_community_source(source).await {
             Ok(json) => {
-                if let Ok(mut guard) = LATEST_COMMUNITY_CONFIG_JSON.write() {
-                    *guard = Some(json.clone());
-                }
-                Some(json)
+                inputs.push(RawBlocklistInput {
+                    name: source.name.clone(),
+                    json,
+                    enabled: true,
+                });
             }
             Err(err) => {
-                tracing::warn!("Failed to fetch community config from {COMMUNITY_CONFIG_URL} ({err:#}); checking cached or local fallback");
-                get_community_config_json()
+                tracing::warn!("Failed to load community list '{}': {err:#}", source.name);
+                inputs.push(RawBlocklistInput {
+                    name: source.name.clone(),
+                    json: String::new(),
+                    enabled: false,
+                });
             }
         }
-    } else {
-        None
-    };
+    }
+
+    if let Ok(mut guard) = LATEST_COMMUNITY_LISTS.write() {
+        *guard = inputs.clone();
+    }
+    if let Some(first) = inputs.iter().find(|i| i.enabled && !i.json.is_empty()) {
+        if let Ok(mut guard) = LATEST_COMMUNITY_CONFIG_JSON.write() {
+            *guard = Some(first.json.clone());
+        }
+    }
 
     let lists = match fetch_remote_config().await {
         Ok(body) => {
             if let Ok(mut guard) = LATEST_VRC_CONFIG_JSON.write() {
                 *guard = Some(body.clone());
             }
-            let merged = parse_vrchat_and_community_config_json(&body, comm_json.as_deref())
-                .unwrap_or_else(|_| build_domain_lists_fallback_with_community_json(comm_json.as_deref()));
+            let merged = parse_all_domain_lists(&body, &inputs)
+                .unwrap_or_else(|_| build_domain_lists_fallback_with_inputs(&inputs));
             tracing::info!(
-                "Successfully built media blocking domain lists dynamically from live VRChat config (videos: {}, images: {}, strings: {}, rest: {}, community: {})",
+                "Successfully built media blocking domain lists dynamically (videos: {}, images: {}, strings: {}, rest: {}, total: {})",
                 merged.video_domains.len(),
                 merged.image_domains.len(),
                 merged.string_domains.len(),
                 merged.rest_domains.len(),
-                load_community
+                merged.total_counts.total()
             );
             merged
         }
         Err(err) => {
             tracing::warn!("Failed to fetch live VRChat config ({err:#}); falling back to hardcoded domain lists");
-            build_domain_lists_fallback_with_community_json(comm_json.as_deref())
+            build_domain_lists_fallback_with_inputs(&inputs)
         }
     };
 
@@ -310,16 +470,38 @@ pub fn build_domain_lists_fallback() -> DomainLists {
 }
 
 pub fn build_domain_lists_fallback_with_community(load_community: bool) -> DomainLists {
-    let comm_json = if load_community {
-        get_community_config_json()
+    let inputs = if load_community {
+        let json = get_community_config_json();
+        vec![RawBlocklistInput {
+            name: "Community".to_string(),
+            json: json.unwrap_or_default(),
+            enabled: true,
+        }]
     } else {
-        None
+        vec![RawBlocklistInput {
+            name: "Community".to_string(),
+            json: String::new(),
+            enabled: false,
+        }]
     };
-    build_domain_lists_fallback_with_community_json(comm_json.as_deref())
+    build_domain_lists_fallback_with_inputs(&inputs)
 }
 
+#[allow(dead_code)]
 pub fn build_domain_lists_fallback_with_community_json(comm_json: Option<&str>) -> DomainLists {
-    parse_vrchat_and_community_config_json(EMBEDDED_FALLBACK_CONFIG, comm_json)
+    let inputs = match comm_json {
+        Some(s) if !s.trim().is_empty() => vec![RawBlocklistInput {
+            name: "Community".to_string(),
+            json: s.to_string(),
+            enabled: true,
+        }],
+        _ => Vec::new(),
+    };
+    build_domain_lists_fallback_with_inputs(&inputs)
+}
+
+pub fn build_domain_lists_fallback_with_inputs(inputs: &[RawBlocklistInput]) -> DomainLists {
+    parse_all_domain_lists(EMBEDDED_FALLBACK_CONFIG, inputs)
         .expect("fallback VRChat config JSON must always be valid")
 }
 
@@ -347,10 +529,27 @@ pub fn parse_vrchat_config_json(json_str: &str) -> Result<DomainLists> {
     parse_vrchat_and_community_config_json(json_str, None)
 }
 
-/// Parse VRChat config and optionally merge community blocklists, smartly enforcing safety invariants.
+/// Parse VRChat config and optionally merge a single community blocklist.
 pub fn parse_vrchat_and_community_config_json(
     vrc_json_str: &str,
     community_json_str: Option<&str>,
+) -> Result<DomainLists> {
+    let inputs = match community_json_str {
+        Some(s) if !s.trim().is_empty() => vec![RawBlocklistInput {
+            name: "Community".to_string(),
+            json: s.to_string(),
+            enabled: true,
+        }],
+        _ => Vec::new(),
+    };
+    parse_all_domain_lists(vrc_json_str, &inputs)
+}
+
+/// Parse VRChat config and multiple community blocklists, smartly enforcing safety invariants
+/// and tracking blocked domain counts per list and total.
+pub fn parse_all_domain_lists(
+    vrc_json_str: &str,
+    community_lists: &[RawBlocklistInput],
 ) -> Result<DomainLists> {
     #[derive(Deserialize, Default)]
     struct VrcRemoteConfig {
@@ -365,62 +564,31 @@ pub fn parse_vrchat_and_community_config_json(
     }
 
     let parsed_vrc: VrcRemoteConfig = serde_json::from_str(vrc_json_str)?;
-    let parsed_community: Option<VrcRemoteConfig> = match community_json_str {
-        Some(s) if !s.trim().is_empty() => serde_json::from_str(s).ok(),
-        _ => None,
-    };
 
-    let mut raw_video: HashSet<String> = HashSet::new();
-    for u in parsed_vrc.url_list {
-        let cleaned = clean_domain_entry(&u);
+    let mut official_video: HashSet<String> = HashSet::new();
+    for u in &parsed_vrc.url_list {
+        let cleaned = clean_domain_entry(u);
         if !cleaned.is_empty() {
-            raw_video.insert(cleaned);
+            official_video.insert(cleaned);
         }
     }
-    if let Some(ref comm) = parsed_community {
-        for u in &comm.url_list {
-            let cleaned = clean_domain_entry(u);
-            if !cleaned.is_empty() {
-                raw_video.insert(cleaned);
-            }
-        }
-    }
-
-    let mut raw_images: HashSet<String> = HashSet::new();
-    for u in parsed_vrc.image_list {
-        let cleaned = clean_domain_entry(&u);
+    let mut official_images: HashSet<String> = HashSet::new();
+    for u in &parsed_vrc.image_list {
+        let cleaned = clean_domain_entry(u);
         if !cleaned.is_empty() {
-            raw_images.insert(cleaned);
+            official_images.insert(cleaned);
         }
     }
-    if let Some(ref comm) = parsed_community {
-        for u in &comm.image_list {
-            let cleaned = clean_domain_entry(u);
-            if !cleaned.is_empty() {
-                raw_images.insert(cleaned);
-            }
-        }
-    }
-
-    let mut raw_strings: HashSet<String> = HashSet::new();
-    for u in parsed_vrc.string_list {
-        let cleaned = clean_domain_entry(&u);
+    let mut official_strings: HashSet<String> = HashSet::new();
+    for u in &parsed_vrc.string_list {
+        let cleaned = clean_domain_entry(u);
         if !cleaned.is_empty() {
-            raw_strings.insert(cleaned);
+            official_strings.insert(cleaned);
         }
     }
-    if let Some(ref comm) = parsed_community {
-        for u in &comm.string_list {
-            let cleaned = clean_domain_entry(u);
-            if !cleaned.is_empty() {
-                raw_strings.insert(cleaned);
-            }
-        }
-    }
-
     let mut protected: HashSet<String> = HashSet::new();
-    for u in parsed_vrc.asset_urls {
-        let cleaned = clean_domain_entry(&u);
+    for u in &parsed_vrc.asset_urls {
+        let cleaned = clean_domain_entry(u);
         if !cleaned.is_empty() {
             protected.insert(cleaned.clone());
             let bare = cleaned.trim_start_matches("*.");
@@ -428,8 +596,58 @@ pub fn parse_vrchat_and_community_config_json(
             protected.insert(format!("*.{bare}"));
         }
     }
-    if let Some(ref comm) = parsed_community {
-        for u in &comm.asset_urls {
+
+    struct CommData {
+        name: String,
+        enabled: bool,
+        video: HashSet<String>,
+        images: HashSet<String>,
+        strings: HashSet<String>,
+    }
+
+    let mut comm_data: Vec<CommData> = Vec::new();
+    let mut raw_video = official_video.clone();
+    let mut raw_images = official_images.clone();
+    let mut raw_strings = official_strings.clone();
+
+    for item in community_lists {
+        if !item.enabled || item.json.trim().is_empty() {
+            comm_data.push(CommData {
+                name: item.name.clone(),
+                enabled: false,
+                video: HashSet::new(),
+                images: HashSet::new(),
+                strings: HashSet::new(),
+            });
+            continue;
+        }
+
+        let parsed: VrcRemoteConfig = serde_json::from_str(&item.json).unwrap_or_default();
+        let mut v_set = HashSet::new();
+        for u in &parsed.url_list {
+            let cleaned = clean_domain_entry(u);
+            if !cleaned.is_empty() {
+                v_set.insert(cleaned.clone());
+                raw_video.insert(cleaned);
+            }
+        }
+        let mut i_set = HashSet::new();
+        for u in &parsed.image_list {
+            let cleaned = clean_domain_entry(u);
+            if !cleaned.is_empty() {
+                i_set.insert(cleaned.clone());
+                raw_images.insert(cleaned);
+            }
+        }
+        let mut s_set = HashSet::new();
+        for u in &parsed.string_list {
+            let cleaned = clean_domain_entry(u);
+            if !cleaned.is_empty() {
+                s_set.insert(cleaned.clone());
+                raw_strings.insert(cleaned);
+            }
+        }
+        for u in &parsed.asset_urls {
             let cleaned = clean_domain_entry(u);
             if !cleaned.is_empty() {
                 protected.insert(cleaned.clone());
@@ -438,6 +656,14 @@ pub fn parse_vrchat_and_community_config_json(
                 protected.insert(format!("*.{bare}"));
             }
         }
+
+        comm_data.push(CommData {
+            name: item.name.clone(),
+            enabled: true,
+            video: v_set,
+            images: i_set,
+            strings: s_set,
+        });
     }
 
     // Always guarantee core asset wildcards
@@ -471,7 +697,6 @@ pub fn parse_vrchat_and_community_config_json(
         if protected.contains(d) || protected.contains(bare) || protected.contains(&format!("*.{bare}")) {
             return true;
         }
-        // Exclude any vrchat internal domains from blocking
         if bare == "vrchat.com" || bare.ends_with(".vrchat.com")
             || bare == "vrchat.cloud" || bare.ends_with(".vrchat.cloud")
             || bare == "dbinj8iahsbec.cloudfront.net" || bare.ends_with(".dbinj8iahsbec.cloudfront.net")
@@ -501,7 +726,6 @@ pub fn parse_vrchat_and_community_config_json(
         .filter(|d| !is_pure_category_protected(d))
         .collect();
 
-    // "Rest": domains that were in multiple lists, excluding VRChat internal and whiteListedAssetUrls
     let mut rest_domains: Vec<String> = in_multiple
         .into_iter()
         .filter(|d| !is_vrc_or_asset_protected(d))
@@ -515,12 +739,82 @@ pub fn parse_vrchat_and_community_config_json(
     let mut protected_list: Vec<String> = protected.into_iter().collect();
     protected_list.sort();
 
+    // Calculate per-list stats
+    let v_set: HashSet<&str> = video_domains.iter().map(|s| s.as_str()).collect();
+    let i_set: HashSet<&str> = image_domains.iter().map(|s| s.as_str()).collect();
+    let s_set: HashSet<&str> = string_domains.iter().map(|s| s.as_str()).collect();
+    let r_set: HashSet<&str> = rest_domains.iter().map(|s| s.as_str()).collect();
+
+    let mut list_stats = Vec::new();
+
+    // 1. Official stats
+    let off_v = official_video.iter().filter(|d| v_set.contains(d.as_str())).count();
+    let off_i = official_images.iter().filter(|d| i_set.contains(d.as_str())).count();
+    let off_s = official_strings.iter().filter(|d| s_set.contains(d.as_str())).count();
+    let off_r = official_video.iter()
+        .chain(official_images.iter())
+        .chain(official_strings.iter())
+        .filter(|d| r_set.contains(d.as_str()))
+        .collect::<HashSet<_>>()
+        .len();
+
+    list_stats.push(BlocklistStats {
+        name: "Official".to_string(),
+        counts: CategoryCounts {
+            video: off_v,
+            image: off_i,
+            string: off_s,
+            rest: off_r,
+        },
+        enabled: true,
+    });
+
+    // 2. Community stats per list
+    for comm in comm_data {
+        if comm.enabled {
+            let cv = comm.video.iter().filter(|d| v_set.contains(d.as_str())).count();
+            let ci = comm.images.iter().filter(|d| i_set.contains(d.as_str())).count();
+            let cs = comm.strings.iter().filter(|d| s_set.contains(d.as_str())).count();
+            let cr = comm.video.iter()
+                .chain(comm.images.iter())
+                .chain(comm.strings.iter())
+                .filter(|d| r_set.contains(d.as_str()))
+                .collect::<HashSet<_>>()
+                .len();
+            list_stats.push(BlocklistStats {
+                name: comm.name,
+                counts: CategoryCounts {
+                    video: cv,
+                    image: ci,
+                    string: cs,
+                    rest: cr,
+                },
+                enabled: true,
+            });
+        } else {
+            list_stats.push(BlocklistStats {
+                name: comm.name,
+                counts: CategoryCounts::default(),
+                enabled: false,
+            });
+        }
+    }
+
+    let total_counts = CategoryCounts {
+        video: video_domains.len(),
+        image: image_domains.len(),
+        string: string_domains.len(),
+        rest: rest_domains.len(),
+    };
+
     Ok(DomainLists {
         video_domains,
         image_domains,
         string_domains,
         rest_domains,
         protected_domains: protected_list,
+        list_stats,
+        total_counts,
     })
 }
 
@@ -981,6 +1275,93 @@ mod tests {
         assert!(!is_file_fresh(&missing_file, COMMUNITY_CACHE_MAX_AGE));
 
         let _ = fs::remove_file(&fresh_file);
+    }
+
+    #[test]
+    fn parse_all_domain_lists_tracks_per_list_and_total_stats() {
+        let vrc_json = r#"{
+            "urlList": ["youtube.com", "twitch.tv", "shared.com"],
+            "imageHostUrlList": ["imgur.com", "shared.com"],
+            "stringHostUrlList": ["pastebin.com"]
+        }"#;
+
+        let comm1_json = r#"{
+            "urlList": ["custom-video1.com", "shared.com"],
+            "imageHostUrlList": ["custom-image1.com"]
+        }"#;
+
+        let comm2_json = r#"{
+            "urlList": ["custom-video2.com"],
+            "stringHostUrlList": ["custom-string2.com", "shared.com"]
+        }"#;
+
+        let inputs = vec![
+            RawBlocklistInput {
+                name: "Community One".to_string(),
+                json: comm1_json.to_string(),
+                enabled: true,
+            },
+            RawBlocklistInput {
+                name: "Community Two".to_string(),
+                json: comm2_json.to_string(),
+                enabled: true,
+            },
+            RawBlocklistInput {
+                name: "Community Disabled".to_string(),
+                json: String::new(),
+                enabled: false,
+            },
+        ];
+
+        let lists = parse_all_domain_lists(vrc_json, &inputs).expect("parse multiple community lists");
+
+        // "shared.com" appears in both video & image (and string in comm2) -> moved to Rest
+        assert!(lists.rest_domains.contains(&"shared.com".to_string()));
+        assert!(!lists.video_domains.contains(&"shared.com".to_string()));
+
+        // Check list_stats length: Official + 3 configured lists = 4 stats
+        assert_eq!(lists.list_stats.len(), 4);
+
+        // Official stats
+        let off = &lists.list_stats[0];
+        assert_eq!(off.name, "Official");
+        assert!(off.enabled);
+        assert_eq!(off.counts.video, 2); // youtube.com, twitch.tv
+        assert_eq!(off.counts.image, 1); // imgur.com
+        assert_eq!(off.counts.string, 1); // pastebin.com
+        assert_eq!(off.counts.rest, 1); // shared.com
+        assert_eq!(off.counts.total(), 5);
+
+        // Community One stats
+        let c1 = &lists.list_stats[1];
+        assert_eq!(c1.name, "Community One");
+        assert!(c1.enabled);
+        assert_eq!(c1.counts.video, 1); // custom-video1.com
+        assert_eq!(c1.counts.image, 1); // custom-image1.com
+        assert_eq!(c1.counts.rest, 1); // shared.com
+        assert_eq!(c1.counts.total(), 3);
+
+        // Community Two stats
+        let c2 = &lists.list_stats[2];
+        assert_eq!(c2.name, "Community Two");
+        assert!(c2.enabled);
+        assert_eq!(c2.counts.video, 1); // custom-video2.com
+        assert_eq!(c2.counts.string, 1); // custom-string2.com
+        assert_eq!(c2.counts.rest, 1); // shared.com
+        assert_eq!(c2.counts.total(), 3);
+
+        // Disabled community list
+        let c3 = &lists.list_stats[3];
+        assert_eq!(c3.name, "Community Disabled");
+        assert!(!c3.enabled);
+        assert_eq!(c3.counts.total(), 0);
+
+        // Total counts
+        assert_eq!(lists.total_counts.video, 4); // youtube.com, twitch.tv, custom-video1.com, custom-video2.com
+        assert_eq!(lists.total_counts.image, 2); // imgur.com, custom-image1.com
+        assert_eq!(lists.total_counts.string, 2); // pastebin.com, custom-string2.com
+        assert_eq!(lists.total_counts.rest, 1); // shared.com
+        assert_eq!(lists.total_counts.total(), 9);
     }
 }
 
