@@ -1,27 +1,8 @@
 # ==============================================================================
 # LVR Blocklist: Video Category
-# Total base domains: 141
+# Total base domains: 154
 # ==============================================================================
 
-0.0.0.0 facebook.com  # Official
-0.0.0.0 fbcdn.net  # Official
-0.0.0.0 furality.online  # Official
-0.0.0.0 googlevideo.com  # Official
-0.0.0.0 hyperbeam.com  # Official
-0.0.0.0 hyperbeam.dev  # Official
-0.0.0.0 jtvnw.net  # Official
-0.0.0.0 midcircuitcdn.com  # Official
-0.0.0.0 mixcloud.com  # Official
-0.0.0.0 nicovideo.jp  # Official
-0.0.0.0 sndcdn.com  # Official
-0.0.0.0 topaz.chat  # Official
-0.0.0.0 ttvnw.net  # Official
-0.0.0.0 twitch.tv  # Community, Official
-0.0.0.0 twitchcdn.net  # Official
-0.0.0.0 vimeo.com  # Official
-0.0.0.0 vrcdn.live  # Official
-0.0.0.0 vrcdn.video  # Community, Official
-0.0.0.0 youku.com  # Official
 0.0.0.0 a.mrunk.de  # Community
 0.0.0.0 alucardwulf.de  # Community
 0.0.0.0 api-vrc.sammy.co.jp  # Official
@@ -59,7 +40,11 @@
 0.0.0.0 e621.net  # Community
 0.0.0.0 esperecyan.github.io  # Community
 0.0.0.0 f.minopia.de  # Community
+0.0.0.0 facebook.com  # Official
+0.0.0.0 fbcdn.net  # Official
 0.0.0.0 filme.titanium-mc.de  # Community
+0.0.0.0 furality.online  # Official
+0.0.0.0 googlevideo.com  # Official
 0.0.0.0 hfs289.serversicuro.cc  # Community
 0.0.0.0 hfs308.serversicuro.cc  # Community
 0.0.0.0 hfs309.serversicuro.cc  # Community
@@ -67,7 +52,10 @@
 0.0.0.0 hfs315.serversicuro.cc  # Community
 0.0.0.0 hfs316.serversicuro.cc  # Community
 0.0.0.0 hfs322.serversicuro.cc  # Community
+0.0.0.0 hyperbeam.com  # Official
+0.0.0.0 hyperbeam.dev  # Official
 0.0.0.0 i290oo.cloudatacdn.com  # Community
+0.0.0.0 jtvnw.net  # Official
 0.0.0.0 kathy.torontocast.com  # Community
 0.0.0.0 kireneko.video  # Community
 0.0.0.0 kuschelwolf.myqnapcloud.com  # Community
@@ -76,7 +64,9 @@
 0.0.0.0 live.minopia.de  # Community
 0.0.0.0 m.youtube.com  # Community
 0.0.0.0 manifest.googlevideo.com  # Community
+0.0.0.0 midcircuitcdn.com  # Official
 0.0.0.0 mightygymcdn.nyc3.cdn.digitaloceanspaces.com  # Official
+0.0.0.0 mixcloud.com  # Official
 0.0.0.0 movie.vketcdn.com  # Official
 0.0.0.0 music.youtube.com  # Community
 0.0.0.0 music4.cdn.vket.com  # Official
@@ -84,6 +74,7 @@
 0.0.0.0 nas.tail230321.ts.net  # Community
 0.0.0.0 nepucdn.com  # Community
 0.0.0.0 nginxipv6test.b-cdn.net  # Community
+0.0.0.0 nicovideo.jp  # Official
 0.0.0.0 ott.dolby.com  # Community
 0.0.0.0 play.hashtech.nl  # Community
 0.0.0.0 player.vimeo.com  # Community
@@ -99,6 +90,7 @@
 0.0.0.0 server.clawsucht.com  # Community
 0.0.0.0 server.wom-gaming.eu  # Community
 0.0.0.0 sites.google.com  # Community
+0.0.0.0 sndcdn.com  # Official
 0.0.0.0 soundcloud.com  # Community, Official
 0.0.0.0 spotify.ukito.de  # Community
 0.0.0.0 static1.e621.net  # Community
@@ -116,21 +108,47 @@
 0.0.0.0 t-ne.x0.to  # Community
 0.0.0.0 themightygym.com  # Official
 0.0.0.0 timofilm.ddns.net  # Community
+0.0.0.0 topaz.chat  # Official
+0.0.0.0 ttvnw.net  # Official
 0.0.0.0 twisteventsasia.com  # Official
+0.0.0.0 twitch.tv  # Community, Official
+0.0.0.0 twitchcdn.net  # Official
 0.0.0.0 u2b.cx  # Community
 0.0.0.0 uwu0ne.nogame.xyz  # Community
 0.0.0.0 vid.pr0gramm.com  # Community
 0.0.0.0 video-weaver.ber01.hls.ttvnw.net  # Community
 0.0.0.0 videzz.net  # Community
+0.0.0.0 vimeo.com  # Official
 0.0.0.0 vod-progressive.akamaized.net  # Official
 0.0.0.0 vods.subsystem.live  # Community
 0.0.0.0 voe.sx  # Community
+0.0.0.0 vrcdn.live  # Official
+0.0.0.0 vrcdn.video  # Community, Official
 0.0.0.0 vrchat.genesis.rocks  # Community
 0.0.0.0 vrde.b-cdn.net  # Community
 0.0.0.0 web.archive.org  # Community
 0.0.0.0 weslie.tk  # Community
 0.0.0.0 www.bild.de  # Community
 0.0.0.0 www.dailymotion.com  # Community
+0.0.0.0 www.facebook.com  # Official
+0.0.0.0 www.fbcdn.net  # Official
+0.0.0.0 www.furality.online  # Official
+0.0.0.0 www.googlevideo.com  # Official
+0.0.0.0 www.hyperbeam.com  # Official
+0.0.0.0 www.hyperbeam.dev  # Official
+0.0.0.0 www.jtvnw.net  # Official
+0.0.0.0 www.midcircuitcdn.com  # Official
+0.0.0.0 www.mixcloud.com  # Official
 0.0.0.0 www.netflix.com  # Community
+0.0.0.0 www.nicovideo.jp  # Official
 0.0.0.0 www.oculus.com  # Community
+0.0.0.0 www.sndcdn.com  # Official
+0.0.0.0 www.topaz.chat  # Official
+0.0.0.0 www.ttvnw.net  # Official
 0.0.0.0 www.twitch.tv  # Community, Official
+0.0.0.0 www.twitchcdn.net  # Official
+0.0.0.0 www.vimeo.com  # Official
+0.0.0.0 www.vrcdn.live  # Official
+0.0.0.0 www.vrcdn.video  # Community, Official
+0.0.0.0 www.youku.com  # Official
+0.0.0.0 youku.com  # Official

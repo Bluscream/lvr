@@ -218,10 +218,26 @@ def main():
                     domains_by_cat[cat].add(cleaned)
                     domain_sources[canonical_domain_key(cleaned)].add("Community")
 
-    # 6. Enforce Category Mutual Exclusivity
+    # 6. Expand wildcard domains (*.domain.tld -> domain.tld + www.domain.tld)
+    expanded_domains_by_cat = defaultdict(set)
+    for cat, d_set in domains_by_cat.items():
+        for d in d_set:
+            if d.startswith("*."):
+                bare = d.lstrip("*.")
+                if bare and bare != "localhost":
+                    expanded_domains_by_cat[cat].add(bare)
+                    expanded_domains_by_cat[cat].add(f"www.{bare}")
+                    # Inherit sources
+                    srcs = domain_sources.get(canonical_domain_key(d), set())
+                    domain_sources[canonical_domain_key(bare)].update(srcs)
+                    domain_sources[canonical_domain_key(f"www.{bare}")].update(srcs)
+            else:
+                expanded_domains_by_cat[cat].add(d)
+
+    # 7. Enforce Category Mutual Exclusivity
     # Any canonical key present in >= 2 categories moves to "Rest"
     cat_by_key = defaultdict(set)
-    for cat, d_set in domains_by_cat.items():
+    for cat, d_set in expanded_domains_by_cat.items():
         for d in d_set:
             cat_by_key[canonical_domain_key(d)].add(cat)
 
@@ -230,7 +246,7 @@ def main():
     final_categories = defaultdict(list)
     rest_set = set()
 
-    for cat, d_set in domains_by_cat.items():
+    for cat, d_set in expanded_domains_by_cat.items():
         for d in d_set:
             ckey = canonical_domain_key(d)
             if ckey in multi_keys:
