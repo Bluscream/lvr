@@ -35,11 +35,6 @@ use std::sync::{Arc, RwLock};
 /// captured at compile time as a fallback whenever the network is unavailable.
 const EMBEDDED_FALLBACK_CONFIG: &str = include_str!("../assets/vrchat_config_fallback.json");
 
-/// Remote URL for community blocklists extracted from community sources and logs.
-#[allow(dead_code)]
-pub const COMMUNITY_CONFIG_URL: &str =
-    "https://github.com/Bluscream/lvr/raw/refs/heads/main/assets/lists/config.json";
-
 /// Detailed domain counts per category.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct CategoryCounts {
@@ -78,7 +73,7 @@ pub struct DomainLists {
     pub image_domains: Vec<String>,
     pub string_domains: Vec<String>,
     pub rest_domains: Vec<String>,
-    #[allow(dead_code)]
+    #[cfg(test)]
     pub protected_domains: Vec<String>,
     pub list_stats: Vec<BlocklistStats>,
     pub total_counts: CategoryCounts,
@@ -112,7 +107,6 @@ pub fn community_cache_path_for_id(id: &str) -> PathBuf {
 }
 
 /// Checks whether a file exists and is less than the given maximum age.
-#[allow(dead_code)]
 pub fn is_file_fresh(path: &Path, max_age: std::time::Duration) -> bool {
     fs::metadata(path)
         .ok()
@@ -252,29 +246,7 @@ pub async fn fetch_community_source(
     }
 }
 
-/// Unconditionally downloads the primary community config JSON from GitHub and saves it to local cache.
-#[allow(dead_code)]
-pub async fn fetch_community_config_remote() -> Result<String> {
-    let source = crate::config::CommunityBlocklistSource {
-        id: "bluscream".to_string(),
-        name: "Community".to_string(),
-        url: COMMUNITY_CONFIG_URL.to_string(),
-        enabled: true,
-    };
-    fetch_remote_url(&source.url).await
-}
 
-/// Fetches the primary community config JSON, redownloading only if the local file is missing or over 1 hour old.
-#[allow(dead_code)]
-pub async fn fetch_community_config() -> Result<String> {
-    let source = crate::config::CommunityBlocklistSource {
-        id: "bluscream".to_string(),
-        name: "Community".to_string(),
-        url: COMMUNITY_CONFIG_URL.to_string(),
-        enabled: true,
-    };
-    fetch_community_source(&source).await
-}
 
 /// Returns the community config JSON from memory cache, local disk cache, or repository file if present.
 /// Note: Community blocklist is NEVER embedded at compile-time.
@@ -306,15 +278,7 @@ pub fn active_domains() -> Arc<DomainLists> {
     fallback
 }
 
-/// Rebuilds and updates `ACTIVE_DOMAIN_LISTS` dynamically (e.g. when toggling community blocklists).
-#[allow(dead_code)]
-pub async fn reload_domain_lists(load_community: bool) -> Arc<DomainLists> {
-    let cfg = crate::config::DomainBlockConfig {
-        load_community_blocklists: load_community,
-        community_sources: crate::config::default_community_sources(),
-    };
-    reload_domain_lists_with_config(&cfg).await
-}
+
 
 /// Rebuilds and updates `ACTIVE_DOMAIN_LISTS` dynamically with a full configuration.
 pub async fn reload_domain_lists_with_config(
@@ -381,15 +345,7 @@ pub async fn reload_domain_lists_with_config(
     arc
 }
 
-/// Try to fetch live VRChat config and community config asynchronously and initialize active domain lists.
-#[allow(dead_code)]
-pub async fn init_from_remote_or_fallback(load_community: bool) {
-    let cfg = crate::config::DomainBlockConfig {
-        load_community_blocklists: load_community,
-        community_sources: crate::config::default_community_sources(),
-    };
-    init_from_remote_or_fallback_with_config(&cfg).await;
-}
+
 
 /// Try to fetch live VRChat config and all community configs asynchronously with a full configuration.
 pub async fn init_from_remote_or_fallback_with_config(
@@ -464,11 +420,6 @@ pub async fn init_from_remote_or_fallback_with_config(
     }
 }
 
-#[allow(dead_code)]
-pub fn build_domain_lists_fallback() -> DomainLists {
-    build_domain_lists_fallback_with_community(LOAD_COMMUNITY_ENABLED.load(Ordering::Relaxed))
-}
-
 pub fn build_domain_lists_fallback_with_community(load_community: bool) -> DomainLists {
     let inputs = if load_community {
         let json = get_community_config_json();
@@ -487,18 +438,7 @@ pub fn build_domain_lists_fallback_with_community(load_community: bool) -> Domai
     build_domain_lists_fallback_with_inputs(&inputs)
 }
 
-#[allow(dead_code)]
-pub fn build_domain_lists_fallback_with_community_json(comm_json: Option<&str>) -> DomainLists {
-    let inputs = match comm_json {
-        Some(s) if !s.trim().is_empty() => vec![RawBlocklistInput {
-            name: "Community".to_string(),
-            json: s.to_string(),
-            enabled: true,
-        }],
-        _ => Vec::new(),
-    };
-    build_domain_lists_fallback_with_inputs(&inputs)
-}
+
 
 pub fn build_domain_lists_fallback_with_inputs(inputs: &[RawBlocklistInput]) -> DomainLists {
     parse_all_domain_lists(EMBEDDED_FALLBACK_CONFIG, inputs)
@@ -524,26 +464,7 @@ async fn fetch_remote_config() -> Result<String> {
 }
 
 /// Parse raw JSON from VRChat `/api/1/config` and partition domains strictly into pure video, image, string sets.
-#[allow(dead_code)]
-pub fn parse_vrchat_config_json(json_str: &str) -> Result<DomainLists> {
-    parse_vrchat_and_community_config_json(json_str, None)
-}
 
-/// Parse VRChat config and optionally merge a single community blocklist.
-pub fn parse_vrchat_and_community_config_json(
-    vrc_json_str: &str,
-    community_json_str: Option<&str>,
-) -> Result<DomainLists> {
-    let inputs = match community_json_str {
-        Some(s) if !s.trim().is_empty() => vec![RawBlocklistInput {
-            name: "Community".to_string(),
-            json: s.to_string(),
-            enabled: true,
-        }],
-        _ => Vec::new(),
-    };
-    parse_all_domain_lists(vrc_json_str, &inputs)
-}
 
 /// Parse VRChat config and multiple community blocklists, smartly enforcing safety invariants
 /// and tracking blocked domain counts per list and total.
@@ -812,6 +733,7 @@ pub fn parse_all_domain_lists(
         image_domains,
         string_domains,
         rest_domains,
+        #[cfg(test)]
         protected_domains: protected_list,
         list_stats,
         total_counts,
@@ -1131,7 +1053,7 @@ mod tests {
 
     #[test]
     fn domain_lists_have_zero_overlap_between_categories() {
-        let fallback = build_domain_lists_fallback();
+        let fallback = build_domain_lists_fallback_with_inputs(&[]);
         let video_set: HashSet<_> = fallback.video_domains.iter().cloned().collect();
         let image_set: HashSet<_> = fallback.image_domains.iter().cloned().collect();
         let string_set: HashSet<_> = fallback.string_domains.iter().cloned().collect();
@@ -1171,7 +1093,7 @@ mod tests {
             "whiteListedAssetUrls": ["https://assets.vrchat.com/adminfiles/", "https://dbinj8iahsbec.cloudfront.net/plugins"]
         }"#;
 
-        let lists = parse_vrchat_config_json(sample_json).expect("failed to parse sample config JSON");
+        let lists = parse_all_domain_lists(sample_json, &[]).expect("failed to parse sample config JSON");
 
         // 1. Check pure separation
         assert!(lists.video_domains.contains(&"*.youtube.com".to_string()));
@@ -1214,7 +1136,12 @@ mod tests {
             "stringHostUrlList": ["custom-string.com"]
         }"#;
 
-        let lists = parse_vrchat_and_community_config_json(vrc_json, Some(community_json))
+        let inputs = vec![RawBlocklistInput {
+            name: "Community".to_string(),
+            json: community_json.to_string(),
+            enabled: true,
+        }];
+        let lists = parse_all_domain_lists(vrc_json, &inputs)
             .expect("merging configs should succeed");
 
         // 1. Community video and image domains are merged
@@ -1248,7 +1175,7 @@ mod tests {
     #[tokio::test]
     async fn community_config_url_and_dynamic_loading() {
         assert_eq!(
-            COMMUNITY_CONFIG_URL,
+            crate::config::DEFAULT_COMMUNITY_CONFIG_URL,
             "https://github.com/Bluscream/lvr/raw/refs/heads/main/assets/lists/config.json"
         );
 
@@ -1257,7 +1184,11 @@ mod tests {
         assert!(!no_comm.video_domains.contains(&"andre-stinkt.de".to_string()));
 
         // When reloading with false, ACTIVE_DOMAIN_LISTS is updated without community lists
-        let reloaded_no_comm = reload_domain_lists(false).await;
+        let cfg = crate::config::DomainBlockConfig {
+            load_community_blocklists: false,
+            community_sources: crate::config::default_community_sources(),
+        };
+        let reloaded_no_comm = reload_domain_lists_with_config(&cfg).await;
         assert!(!reloaded_no_comm.video_domains.contains(&"andre-stinkt.de".to_string()));
     }
 

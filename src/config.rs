@@ -27,7 +27,6 @@ pub enum Trigger {
 }
 
 impl Trigger {
-    #[allow(dead_code)]
     pub const KINDS: [&'static str; 5] = [
         "VRChat running",
         "WiVRn running",
@@ -241,110 +240,9 @@ impl Default for WivrnConfig {
     }
 }
 
-/// One named Proton setup for the managed Steam app.
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(default)]
-pub struct SteamProfile {
-    /// Label shown on the dashboard button.
-    pub name: String,
-    /// Compat tool directory name, as it appears in `CompatToolMapping`.
-    pub compat_tool: String,
-    /// Full `LaunchOptions` string, `%command%` included.
-    pub launch_options: String,
-    /// One line explaining what this profile is for, shown in the confirmation.
-    pub note: String,
-}
-
-/// Switching VRChat between Proton setups. Steam has to be restarted for a
-/// switch to take, because it rewrites both VDF files when it exits.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(default)]
-pub struct SteamConfig {
-    /// Show the profile switch button at all.
-    pub enabled: bool,
-    /// Steam AppID the profiles apply to. VRChat is 438100.
-    pub app_id: String,
-    /// Steam installation root. Empty = auto-detect.
-    pub steam_root: String,
-    /// `localconfig.vdf` to edit. Empty = the profile that owns `app_id`.
-    pub localconfig_vdf: String,
-    /// Command that asks a running Steam to exit.
-    pub shutdown_command: String,
-    /// Command used to start Steam again afterwards.
-    pub start_command: String,
-    /// How long to wait for Steam to actually exit.
-    pub shutdown_timeout_secs: u64,
-    /// Ask before switching (and restarting Steam).
-    pub confirm_switch: bool,
-    /// The profiles cycled through by the dashboard button.
-    pub profiles: Vec<SteamProfile>,
-}
-
-const VRC_LAUNCH_BASE: &str = "G_TLS_GNUTLS_PRIORITY=NORMAL \
-     PRESSURE_VESSEL_IMPORT_OPENXR_1_RUNTIMES=1 \
-     PRESSURE_VESSEL_FILESYSTEMS_RW=/var/lib/flatpak/app/io.github.wivrn.wivrn \
-     %command% --enable-avpro-in-proton --enable-hw-video-decoding";
-
-impl Default for SteamConfig {
-    fn default() -> Self {
-        Self {
-            enabled: true,
-            app_id: "438100".into(),
-            steam_root: String::new(),
-            localconfig_vdf: String::new(),
-            shutdown_command: "steam -shutdown".into(),
-            start_command: default_steam_start_command(),
-            shutdown_timeout_secs: 60,
-            confirm_switch: true,
-            profiles: vec![
-                SteamProfile {
-                    name: "Latest VRC".into(),
-                    compat_tool: "proton-rtsp-11.0-20260609-2".into(),
-                    launch_options: VRC_LAUNCH_BASE.to_string(),
-                    note: "Proton RTSP 11.0 with hardware video decoding & AVPro enabled.".into(),
-                },
-                SteamProfile {
-                    name: "Video comp".into(),
-                    compat_tool: "GE-Proton9-25".into(),
-                    launch_options:
-                        "WINEDLLOVERRIDES=\"iyuv_32=\" PRESSURE_VESSEL_IMPORT_OPENXR_1_RUNTIMES=1 PRESSURE_VESSEL_FILESYSTEMS_RW=/var/lib/flatpak/app/io.github.wivrn.wivrn %command% --enable-hw-video-decoding"
-                            .into(),
-                    note: "Older Proton-GE fallback with working Media Foundation DLLs."
-                        .into(),
-                },
-            ],
-        }
-    }
-}
-
-/// Prefer a distro wrapper (Bazzite ships one that sets up the session) over
-/// plain `steam`, since that is how such systems are meant to start it.
-fn default_steam_start_command() -> String {
-    for candidate in ["bazzite-steam", "steam"] {
-        if crate::procs::which(candidate).is_some() {
-            return candidate.to_string();
-        }
-    }
-    "steam".to_string()
-}
 
 
 
-impl SteamConfig {
-    /// The profile to switch to when the button is pressed, given the profile
-    /// that is active now. Cycles, so a third profile would work too.
-    #[allow(dead_code)]
-    pub fn next_profile(&self, active: Option<&str>) -> Option<&SteamProfile> {
-        if self.profiles.is_empty() {
-            return None;
-        }
-        let index = active
-            .and_then(|name| self.profiles.iter().position(|p| p.name == name))
-            .map(|i| (i + 1) % self.profiles.len())
-            .unwrap_or(0);
-        self.profiles.get(index)
-    }
-}
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
@@ -411,11 +309,14 @@ pub struct CommunityBlocklistSource {
     pub enabled: bool,
 }
 
+pub const DEFAULT_COMMUNITY_CONFIG_URL: &str =
+    "https://github.com/Bluscream/lvr/raw/refs/heads/main/assets/lists/config.json";
+
 pub fn default_community_sources() -> Vec<CommunityBlocklistSource> {
     vec![CommunityBlocklistSource {
         id: "bluscream".to_string(),
         name: "Community".to_string(),
-        url: "https://github.com/Bluscream/lvr/raw/refs/heads/main/assets/lists/config.json".to_string(),
+        url: DEFAULT_COMMUNITY_CONFIG_URL.to_string(),
         enabled: true,
     }]
 }
@@ -444,7 +345,6 @@ pub struct Config {
     pub general: General,
     pub wivrn: WivrnConfig,
     pub audio: AudioConfig,
-    pub steam: SteamConfig,
     pub virtual_display: VirtualDisplayConfig,
     pub domain_block: DomainBlockConfig,
     #[serde(rename = "autostart")]
@@ -457,7 +357,6 @@ impl Default for Config {
             general: General::default(),
             wivrn: WivrnConfig::default(),
             audio: AudioConfig::default(),
-            steam: SteamConfig::default(),
             virtual_display: VirtualDisplayConfig::default(),
             domain_block: DomainBlockConfig::default(),
             autostart: default_entries(),
@@ -535,8 +434,6 @@ impl Config {
         self.general.stop_grace_secs = self.general.stop_grace_secs.clamp(1, 300);
         self.wivrn.restart_delay_secs = self.wivrn.restart_delay_secs.clamp(1, 3600);
         self.virtual_display.debounce_secs = self.virtual_display.debounce_secs.clamp(0, 60);
-        self.steam.shutdown_timeout_secs = self.steam.shutdown_timeout_secs.clamp(5, 300);
-        self.steam.profiles.retain(|p| !p.name.trim().is_empty());
         self.general.vrchat_match = self
             .general
             .vrchat_match
@@ -698,42 +595,7 @@ fn default_entries() -> Vec<AutostartEntry> {
 mod tests {
     use super::*;
 
-    #[test]
-    fn steam_profiles_cycle_and_fall_back_to_the_first() {
-        let steam = SteamConfig::default();
-        assert_eq!(
-            steam.next_profile(Some("Video comp")).map(|p| p.name.as_str()),
-            Some("Latest VRC")
-        );
-        assert_eq!(
-            steam.next_profile(Some("Latest VRC")).map(|p| p.name.as_str()),
-            Some("Video comp")
-        );
-        // Unknown or unrecognised current setup: offer the first profile.
-        assert_eq!(steam.next_profile(None).map(|p| p.name.as_str()), Some("Latest VRC"));
-        assert_eq!(
-            steam.next_profile(Some("nonsense")).map(|p| p.name.as_str()),
-            Some("Latest VRC")
-        );
 
-        let empty = SteamConfig {
-            profiles: Vec::new(),
-            ..SteamConfig::default()
-        };
-        assert!(empty.next_profile(None).is_none());
-    }
-
-    #[test]
-    fn both_steam_profiles_keep_the_command_placeholder() {
-        for profile in SteamConfig::default().profiles {
-            assert!(
-                profile.launch_options.contains("%command%"),
-                "{} lost %command%",
-                profile.name
-            );
-            assert!(!profile.compat_tool.is_empty());
-        }
-    }
 
     #[test]
     fn slugify_makes_stable_ids() {

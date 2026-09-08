@@ -261,7 +261,7 @@ pub fn editor_body(ui: &mut Ui, editor: &mut EntryEditor) {
 
             ui.label("Start trigger");
             ui.vertical(|ui| {
-                let kinds = ["WiVRn running", "Headset connected", "VRChat running", "Custom process", "Manual only"];
+                let kinds = crate::config::Trigger::KINDS;
                 egui::ComboBox::from_id_salt("editor-trigger-kind")
                     .selected_text(kinds.get(editor.trigger_kind).copied().unwrap_or("Manual only"))
                     .show_ui(ui, |ui| {

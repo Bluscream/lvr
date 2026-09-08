@@ -1,6 +1,6 @@
 # lvr — LinuxVR
 
-A lightweight tray app and GUI for managing Linux VR sessions (WiVRn, automatic audio routing, headless virtual displays, Proton profiles, and companion apps).
+A lightweight tray app and GUI for managing Linux VR sessions (WiVRn, automatic audio routing, headless virtual displays, and companion apps).
 
 ## Features
 
@@ -8,9 +8,8 @@ A lightweight tray app and GUI for managing Linux VR sessions (WiVRn, automatic 
 - **Audio Switching:** Automatically switches default PipeWire audio output and microphone to/from the headset on connect/disconnect.
 - **Companion App Supervisor:** Starts and stops companion tools (e.g. VRCX, SlimeVR, VRCOSC, VRCVideoCacher) based on customizable triggers (VRChat, WiVRn, headset connection) and grace periods.
 - **Virtual Display Management:** Manages virtual displays via KWin / `kscreen-doctor` for headless or VR streaming use.
-- **Steam & Proton Profile Switcher:** Easily switch VRChat between Proton configurations (e.g. RTSP hardware decoding vs. compatibility fallbacks) with clean Steam restart handling.
-- **VRChat Prefix & Domain Blocking:** Selective blocking of video players, images, strings, and REST domains inside the VRChat prefix with shared asset protection.
-- **VR Dashboard:** VR-tailored UI with big touch/laser targets for toggling audio, restarting WiVRn, switching profiles, and stopping all VR processes in one click.
+- **VRChat Prefix & Domain Blocking:** Selective blocking of video players, images, strings, and REST domains inside the VRChat prefix with shared asset protection and multi-list community blocklists.
+- **VR Dashboard:** VR-tailored UI with big touch/laser targets for toggling audio, restarting WiVRn, and stopping all VR processes in one click.
 
 ## Quick Start
 

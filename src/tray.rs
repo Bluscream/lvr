@@ -375,7 +375,6 @@ mod tests {
     fn cosmetic_only_changes_do_not_redraw() {
         let a = status();
         let mut b = status();
-        b.last_tick = Some(chrono::Local::now());
         b.default_sink = "something".into();
         assert!(!tray_relevant_change(&a, &b));
     }

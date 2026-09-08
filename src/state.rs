@@ -28,18 +28,12 @@ pub enum Command {
     RefreshAudioDevices,
     /// Persist the current config to disk.
     SaveConfig,
-    /// Point the managed Steam app at the named Proton profile, restarting
-    /// Steam around the edit.
-    SwitchSteamProfile(String),
     /// Create a virtual display manually or on trigger.
     CreateVirtualDisplay,
     /// Remove/disable virtual display manually or on trigger.
     RemoveVirtualDisplay,
     /// Toggle media/domain blocking for a specific category (Video, Images, Strings, Rest).
     ToggleBlockCategory(crate::domain_block::BlockCategory),
-    /// Set media/domain blocking state for a specific category.
-    #[allow(dead_code)]
-    SetBlockCategory(crate::domain_block::BlockCategory, bool),
     /// Reload or update active domain lists (e.g. after community blocklists toggle).
     ReloadDomainLists,
     Quit,
@@ -59,25 +53,12 @@ pub struct Status {
     pub default_source: String,
     pub audio_on_vr: bool,
     pub entries: Vec<EntryStatus>,
-    /// Name of the configured Steam profile matching what is on disk, if any.
-    #[allow(dead_code)]
-    pub steam_profile: Option<String>,
-    /// Compat tool the managed Steam app is pinned to right now.
-    #[allow(dead_code)]
-    pub steam_compat_tool: String,
-    /// A profile switch is in progress (Steam is being restarted).
-    #[allow(dead_code)]
-    pub steam_switching: bool,
     /// Active blocking state for Video, Images, Strings, and Rest.
     pub block_state: crate::domain_block::BlockState,
     pub sinks: Vec<AudioDevice>,
     pub sources: Vec<AudioDevice>,
-    #[allow(dead_code)]
-    pub display_count: usize,
     pub virtual_display_created: bool,
     pub virtual_display_info: Option<String>,
-    #[allow(dead_code)]
-    pub last_tick: Option<DateTime<Local>>,
 }
 
 impl Status {
