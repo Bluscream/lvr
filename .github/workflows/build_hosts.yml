@@ -1,0 +1,38 @@
+name: Build and Update Blocklists
+
+on:
+  schedule:
+    # Run once daily at 04:00 UTC
+    - cron: '0 4 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-hosts:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Generate pre-compiled hosts files
+        run: |
+          python3 scripts/build_hosts_files.py
+
+      - name: Commit and push changes
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add assets/lists/hosts/*.hosts assets/lists/all.hosts assets/lists/community.json .references/domains/
+          if git diff --staged --quiet; then
+            echo "No changes in hosts or domain lists."
+          else
+            git commit -m "Auto-update pre-filtered category hosts files [skip ci]"
+            git push origin main
+          fi

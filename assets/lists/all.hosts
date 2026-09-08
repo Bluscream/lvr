@@ -4,10 +4,9 @@
 # ==============================================================================
 
 # ------------------------------------------------------------------------------
-# VIDEO STREAMING & HOSTING DOMAINS (129 entries)
+# VIDEO STREAMING & HOSTING DOMAINS (123 entries)
 # ------------------------------------------------------------------------------
 0.0.0.0 a.mrunk.de  # Video domain
-0.0.0.0 accounts.google.com  # Video domain
 0.0.0.0 alucardwulf.de  # Video domain
 0.0.0.0 api.u2b.cx  # Video domain [Also used for: image, string]
 0.0.0.0 arikazei.wom-gaming.eu  # Video domain
@@ -43,7 +42,6 @@
 0.0.0.0 drive.usercontent.google.com  # Video domain
 0.0.0.0 e621.net  # Video domain
 0.0.0.0 esperecyan.github.io  # Video domain
-0.0.0.0 eu2.vrdancing.club  # Video domain
 0.0.0.0 f.minopia.de  # Video domain
 0.0.0.0 filme.titanium-mc.de  # Video domain
 0.0.0.0 hfs289.serversicuro.cc  # Video domain
@@ -60,7 +58,6 @@
 0.0.0.0 kvrradio.com  # Video domain
 0.0.0.0 live.minopia.de  # Video domain
 0.0.0.0 localhost  # Video domain
-0.0.0.0 localhost.youtube.com  # Video domain
 0.0.0.0 m.youtube.com  # Video domain
 0.0.0.0 manifest.googlevideo.com  # Video domain
 0.0.0.0 media.discordapp.net  # Video domain [Also used for: image]
@@ -101,8 +98,6 @@
 0.0.0.0 t-ne.x0.to  # Video domain
 0.0.0.0 timofilm.ddns.net  # Video domain
 0.0.0.0 u2b.cx  # Video domain
-0.0.0.0 upos-sz-estghw.bilivideo.com  # Video domain
-0.0.0.0 upos-sz-mirror08h.bilivideo.com  # Video domain
 0.0.0.0 uwu0ne.nogame.xyz  # Video domain
 0.0.0.0 vid.pr0gramm.com  # Video domain
 0.0.0.0 video-weaver.ber01.hls.ttvnw.net  # Video domain
@@ -127,7 +122,6 @@
 0.0.0.0 www.oculus.com  # Video domain
 0.0.0.0 www.twitch.tv  # Video domain
 0.0.0.0 www.youtube.com  # Video domain [Also used for: string]
-0.0.0.0 x  # Video domain
 0.0.0.0 youtu.be  # Video domain [Also used for: string]
 0.0.0.0 youtube.com  # Video domain [Also used for: string]
 # Direct IP endpoints observed in video URLs:
