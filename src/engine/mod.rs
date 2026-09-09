@@ -69,7 +69,9 @@ impl Engine {
             cached_sources: Vec::new(),
             cached_default_sink: String::new(),
             cached_default_source: String::new(),
-            block_state: crate::domain_block::BlockState::default(),
+            block_state: crate::domain_block::detect_vrc_prefix("")
+                .map(|p| crate::domain_block::read_block_state(&p))
+                .unwrap_or_default(),
             last_media_block_poll: None,
             virtual_display_created: false,
             virtual_display_info: None,
@@ -186,9 +188,9 @@ impl Engine {
                 self.last_audio_poll = None;
                 self.last_media_block_poll = None;
 
-                // Re-sync block state to shield rules to ensure consistency
+                // Re-read prefix block state immediately
                 if let Some(prefix) = crate::domain_block::detect_vrc_prefix("") {
-                    let _ = crate::domain_block::sync_all(&prefix, &self.block_state);
+                    self.block_state = crate::domain_block::read_block_state(&prefix);
                 }
 
                 // Reload domains
@@ -396,14 +398,16 @@ impl Engine {
     }
 
     fn refresh_media_block_cache(&mut self) {
-        // Block state is managed in-memory; nothing to poll from disk.
-        // This method is kept as a hook for future refresh logic.
         if let Some(last) = self.last_media_block_poll
             && last.elapsed() < MEDIA_BLOCK_POLL_INTERVAL
         {
             return;
         }
         self.last_media_block_poll = Some(Instant::now());
+
+        if let Some(prefix) = crate::domain_block::detect_vrc_prefix("") {
+            self.block_state = crate::domain_block::read_block_state(&prefix);
+        }
     }
 
     async fn set_block_category(&mut self, category: crate::domain_block::BlockCategory, block: bool) {
@@ -520,7 +524,9 @@ pub async fn probe(config: &Config) -> Status {
         default_source,
         audio_on_vr,
         entries,
-        block_state: crate::domain_block::BlockState::default(),
+        block_state: crate::domain_block::detect_vrc_prefix("")
+            .map(|p| crate::domain_block::read_block_state(&p))
+            .unwrap_or_default(),
         sinks: audio::list_devices(Kind::Sink).await.unwrap_or_default(),
         sources: audio::list_devices(Kind::Source).await.unwrap_or_default(),
         virtual_display_created: false,

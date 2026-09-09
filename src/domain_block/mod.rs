@@ -4,8 +4,8 @@
 //! with fallback to live official VRChat remote config, and final fallback
 //! to embedded compile-time VRChat config.
 //!
-//! Domain blocking is enforced via the DNS shield (`liblvr_dns_shield.so`) and
-//! yt-dlp stub.
+//! Domain blocking is enforced via the prefix hosts file (managed with the `hostsfile` crate),
+//! the DNS shield (`liblvr_dns_shield.so`), and the yt-dlp stub.
 
 use std::collections::BTreeMap;
 use std::fs;
@@ -76,6 +76,27 @@ impl BlockCategory {
 
     pub fn short_label(&self) -> &str {
         self.label()
+    }
+
+    /// Returns the tag used by `hostsfile::HostsBuilder` (e.g. `LVR_Videos`).
+    pub fn tag_name(&self) -> String {
+        format!("LVR_{}", self.name())
+    }
+
+    /// Parses a category from a tag line or tag comment.
+    pub fn from_tag(tag: &str) -> Option<Self> {
+        let tag = tag.trim();
+        // Standard hostsfile crate tag format: "# DO NOT EDIT LVR_<name> BEGIN"
+        if let Some(rest) = tag.strip_prefix("# DO NOT EDIT LVR_")
+            && let Some(name) = rest.strip_suffix(" BEGIN")
+        {
+            return Some(Self::from_name(name));
+        }
+        // Direct tag name: "LVR_<name>"
+        if let Some(name) = tag.strip_prefix("LVR_") {
+            return Some(Self::from_name(name));
+        }
+        None
     }
 }
 
@@ -340,12 +361,83 @@ fn expand_tilde(path: &str) -> String {
     }
 }
 
+pub fn prefix_hosts_path(prefix: &Path) -> PathBuf {
+    if prefix.join("pfx/drive_c/windows/system32/drivers/etc/hosts").exists()
+        || prefix.join("pfx/drive_c").exists()
+    {
+        prefix.join("pfx/drive_c/windows/system32/drivers/etc/hosts")
+    } else {
+        prefix.join("drive_c/windows/system32/drivers/etc/hosts")
+    }
+}
+
 pub fn vrc_tools_dir(prefix: &Path) -> PathBuf {
     prefix.join("pfx/drive_c/users/steamuser/AppData/LocalLow/VRChat/VRChat/Tools")
 }
 
-/// Apply full block state (yt-dlp stub + dns_shield rules) cleanly in one atomic operation.
+/// Read current blocking state of all categories from prefix hosts file.
+pub fn read_block_state(prefix: &Path) -> BlockState {
+    let hosts_path = prefix_hosts_path(prefix);
+    let content = fs::read_to_string(&hosts_path).unwrap_or_default();
+    let mut state = BlockState::default();
+
+    for line in content.lines() {
+        if let Some(cat) = BlockCategory::from_tag(line.trim()) {
+            state.set_blocked(&cat, true);
+        }
+    }
+
+    state
+}
+
+/// Set the blocking state for a given category.
+#[allow(dead_code)]
+pub fn set_category_blocked(prefix: &Path, category: &BlockCategory, block: bool) -> Result<()> {
+    let mut state = read_block_state(prefix);
+    state.set_blocked(category, block);
+    sync_all(prefix, &state)?;
+    Ok(())
+}
+
+/// Updates the hosts file in the Proton prefix using `hostsfile::HostsBuilder`.
+pub fn update_hosts_file(prefix: &Path, state: &BlockState) -> Result<()> {
+    let hosts_path = prefix_hosts_path(prefix);
+    if let Some(parent) = hosts_path.parent() {
+        fs::create_dir_all(parent)?;
+    }
+
+    if !hosts_path.is_file() {
+        fs::write(&hosts_path, "127.0.0.1 localhost\n::1 localhost\n")?;
+    }
+
+    let lists = active_domains();
+    let zero_ip: IpAddr = "0.0.0.0".parse()?;
+
+    for cat in lists.all_categories() {
+        let mut builder = hostsfile::HostsBuilder::new(cat.tag_name());
+        if state.is_blocked(&cat)
+            && let Some(domain_list) = lists.domains.get(cat.name())
+        {
+            let valid_hostnames: Vec<&String> = domain_list
+                .iter()
+                .filter(|d| d.parse::<IpAddr>().is_err() && !d.trim_start_matches("*.").parse::<IpAddr>().is_ok())
+                .collect();
+            if !valid_hostnames.is_empty() {
+                builder.add_hostnames(zero_ip, valid_hostnames);
+            }
+        }
+
+        // If unblocked (empty builder), hostsfile automatically removes the section!
+        builder.write_to(&hosts_path)
+            .map_err(|e| anyhow::anyhow!("Failed writing hosts file with hostsfile crate: {e}"))?;
+    }
+
+    Ok(())
+}
+
+/// Apply full block state (prefix hosts + yt-dlp stub + dns_shield rules) cleanly in one atomic operation.
 pub fn sync_all(prefix: &Path, state: &BlockState) -> Result<()> {
+    update_hosts_file(prefix, state)?;
     update_ytdlp_file(prefix, state.video_blocked)?;
     let _ = dns_shield::sync_shield_rules(state);
     Ok(())
@@ -428,6 +520,37 @@ mod tests {
         assert!(parsed.contains_key("Images"));
         assert!(parsed.contains_key("Strings"));
         assert!(parsed.contains_key("Shared"));
+    }
+
+    #[test]
+    fn hostsfile_builder_sync_and_unblock() {
+        let temp_dir = std::env::temp_dir().join("lvr_hostsfile_test");
+        let _ = fs::remove_dir_all(&temp_dir);
+        fs::create_dir_all(&temp_dir).unwrap();
+
+        let hosts_path = temp_dir.join("hosts");
+        fs::write(&hosts_path, "127.0.0.1 localhost\n::1 localhost\n").unwrap();
+
+        // 1. Write block for Videos
+        let mut builder = hostsfile::HostsBuilder::new(BlockCategory::Videos.tag_name());
+        let zero_ip: IpAddr = "0.0.0.0".parse().unwrap();
+        builder.add_hostnames(zero_ip, ["youtube.com", "twitch.tv"]);
+        builder.write_to(&hosts_path).unwrap();
+
+        let content = fs::read_to_string(&hosts_path).unwrap();
+        assert!(content.contains("# DO NOT EDIT LVR_Videos BEGIN"));
+        assert!(content.contains("0.0.0.0 youtube.com twitch.tv"));
+        assert!(content.contains("# DO NOT EDIT LVR_Videos END"));
+
+        // 2. Clear block for Videos (empty builder)
+        let empty_builder = hostsfile::HostsBuilder::new(BlockCategory::Videos.tag_name());
+        empty_builder.write_to(&hosts_path).unwrap();
+
+        let cleared_content = fs::read_to_string(&hosts_path).unwrap();
+        assert!(!cleared_content.contains("LVR_Videos"));
+        assert!(!cleared_content.contains("youtube.com"));
+
+        let _ = fs::remove_dir_all(&temp_dir);
     }
 
 
