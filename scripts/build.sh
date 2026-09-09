@@ -23,6 +23,8 @@ Usage: ./scripts/build.sh [OPTIONS]
   --deploy           Install/deploy lvr into $HOME/.local after building
   --autostart        Also start LinuxVR when you log in (with --deploy)
   --no-autostart     Do not touch the autostart entry (with --deploy)
+  --test-only        Run test suite (including getaddrinfo-rs & DNS integration) and exit
+  --skip-wine-test   Skip Wine/Windows executable DNS interceptor test
   --uninstall        Remove everything this script installed
   -h, --help         Show this help
 
@@ -34,11 +36,16 @@ alongside another build of lvr rather than replacing its menu entry, e.g.
 EOF
 }
 
+test_only=no
+skip_wine_test=no
+
 while [ $# -gt 0 ]; do
     case "$1" in
         --deploy) deploy=yes ;;
         --autostart) autostart=yes ;;
         --no-autostart) autostart=no ;;
+        --test-only) test_only=yes ;;
+        --skip-wine-test) skip_wine_test=yes ;;
         --uninstall) action=uninstall ;;
         -h|--help) usage; exit 0 ;;
         *) echo "unknown option: $1" >&2; usage >&2; exit 2 ;;
@@ -94,8 +101,30 @@ fi
 echo "==> Checking code with clippy (-D warnings)…"
 cargo clippy --all-targets --manifest-path "$SOURCE_DIR/Cargo.toml" -- -D warnings
 
-echo "==> Running test suite…"
+echo "==> Running lvr test suite…"
 cargo test --manifest-path "$SOURCE_DIR/Cargo.toml"
+
+# Test getaddrinfo-rs (DNS shield interceptor) if present
+GETADDRINFO_DIR="$(cd "$SOURCE_DIR/../getaddrinfo-rs" 2>/dev/null && pwd || true)"
+if [ -d "$GETADDRINFO_DIR" ] && [ -f "$GETADDRINFO_DIR/scripts/build.sh" ]; then
+    echo "==> Running getaddrinfo-rs build & test script…"
+    if [ "$skip_wine_test" = yes ]; then
+        "$GETADDRINFO_DIR/scripts/build.sh" --test --skip-wine-test
+    else
+        "$GETADDRINFO_DIR/scripts/build.sh" --test
+    fi
+elif [ -d "$GETADDRINFO_DIR" ] && [ -f "$GETADDRINFO_DIR/Cargo.toml" ]; then
+    echo "==> Testing getaddrinfo-rs via cargo…"
+    cargo clippy --all-targets --manifest-path "$GETADDRINFO_DIR/Cargo.toml" -- -D warnings
+    cargo test --manifest-path "$GETADDRINFO_DIR/Cargo.toml"
+    cargo build --release --manifest-path "$GETADDRINFO_DIR/Cargo.toml"
+fi
+
+if [ "$test_only" = yes ]; then
+    echo
+    echo "All tests completed successfully (--test-only)!"
+    exit 0
+fi
 
 echo "==> Building lvr (release)…"
 cargo build --release --manifest-path "$SOURCE_DIR/Cargo.toml"
@@ -125,6 +154,17 @@ echo "Installing…"
 install_file 755 "$SOURCE_DIR/target/release/lvr" "$BIN_DIR/lvr"
 install_file 644 "$SOURCE_DIR/assets/lvr.svg"     "$ICON_DIR/lvr.svg"
 install_file 644 "$entry"                         "$APP_DIR/$DESKTOP_ID.desktop"
+
+# Deploy getaddrinfo-rs when lvr is deployed
+if [ -d "$GETADDRINFO_DIR" ] && [ -f "$GETADDRINFO_DIR/scripts/build.sh" ]; then
+    echo "Deploying getaddrinfo-rs alongside lvr…"
+    BIN_DIR="$BIN_DIR" LIB_DIR="${LIB_DIR:-$HOME/.local/lib}" "$GETADDRINFO_DIR/scripts/build.sh" --deploy --skip-wine-test
+    # Also ensure lvr data directory has the DNS shield library deployed
+    LVR_DATA_DIR="$HOME/.local/share/lvr"
+    if [ -f "$GETADDRINFO_DIR/target/release/libgetaddrinfo.so" ]; then
+        install_file 755 "$GETADDRINFO_DIR/target/release/libgetaddrinfo.so" "$LVR_DATA_DIR/liblvr_dns_shield.so"
+    fi
+fi
 
 if [ "$autostart" = ask ] && [ -t 0 ]; then
     read -r -p "Start LinuxVR automatically when you log in? [Y/n] " reply
