@@ -1,84 +1,44 @@
-# lvr — Agent Conventions & Established Rules
+# lvr — Agent Conventions
 
-## Commits
-- Make **frequent, atomic commits** after every meaningful change.
-- Commit message format: `<type>: <short description>` (e.g. `fix:`, `refactor:`, `cleanup:`, `build:`, `ui:`).
+## Commits and code structure
 
-## Code Cleanliness — Hard Rules
+Make frequent, atomic commits after meaningful verified changes. Use `<type>: <description>`.
+Keep unrelated user edits intact. No dead code, commented-out implementations, or runtime
+aliases for removed application formats. `build.rs` enforces the existing forbidden-word
+policy and the 1000-line maximum for Rust source files; prefer focused modules well below it.
 
-### No Legacy / Compatibility Code
-The build script (`build.rs`) enforces this at **compile time**.  
-Any line in `src/` containing the following keywords (case-insensitive) **fails the build**:
+## Domain categories and policy
 
-> `legacy`, `compatibility`, `compat`, `backward`, `migration`, `migrate`, `migrat`, `deprecated`
+Canonical category names are Videos, Images, Strings, Shared, and verbatim custom names.
+Convert official API field names at their input boundary; do not add aliases to from_name.
+Validate domains and protect VRChat core/asset domains before writing blocklists.
 
-**Allowlisted third-party names** (Steam paths/VDF keys we don't control):
-- `compatdata`
-- `CompatToolMapping`
-- `compat_tool`
+Desired BlockState is kept in memory and persisted in configuration. Existing prefix state
+can seed a first run. Hosts files are enforcement output, not a recurring source that may
+erase desired policy when Steam resets them. Surface partial failures and retry; do not
+report successful enforcement when a required filesystem operation failed.
 
-**Policy**: Remove dead code entirely. Do not comment it out.
+## One DNS implementation
 
-### File Length Limit
-Also enforced in `build.rs` at compile time: **no `.rs` file in `src/` may exceed 1000 lines**.
+Use **getaddrinfo-rs only**, as explicitly requested by the user. LinuxVR does not build,
+embed, or maintain a separate C interceptor. The build script verifies the sibling project
+and deployment installs its Rust library as liblvr_dns_shield.so. Domain rules are written
+to the Proton prefix hosts file; stale shield_rules.txt paths are not used.
 
----
+File replacements must be atomic. Preserve unrelated hosts entries, other LD_PRELOAD
+libraries, quoting in launch options, and a usable yt-dlp backup. Never truncate a loaded
+shared library in place. All Steam integration belongs in src/steam/.
 
-## Domain / Blocklist Category Naming Convention
+## UI and lifecycle
 
-**Strict canonical names — no aliases, no singular forms:**
+Keep primary VR actions large. Category buttons show names with red/green policy colors;
+counts belong in summaries and describe rules, not observed traffic. DNS installation
+controls belong in Settings. Close-to-tray is allowed only when a tray is available.
+Only remove displays/process resources owned by LinuxVR. Logging must explain failures.
 
-| Canonical name | Maps from (VRChat API / other sources) |
-|----------------|----------------------------------------|
-| `Videos`       | `Video`, `urlList`                     |
-| `Images`       | `Image`, `imageHostUrlList`            |
-| `Strings`      | `String`, `stringHostUrlList`          |
-| `Shared`       | `Rest`, cross-category duplicates      |
-| `<verbatim>`   | Any other name (e.g. `Analytics`)      |
+## Verification and deployment
 
-**Where the convention is enforced:**
-- `assets/lists/domains.json` — source file always has canonical keys.
-- `vrchat_config.rs` — `parse_vrchat_config_to_categories()` emits canonical keys.
-- `from_name()` in `domain_block/mod.rs` — exact `match` only, no aliases or `eq_ignore_ascii_case` fallbacks.
-
-**Do not** add runtime normalization/aliasing in load or sync code. If a data source uses non-canonical names, fix the source data.
-
----
-
-## Architecture
-
-### Block State
-`BlockState` in `domain_block/mod.rs` is the **sole in-memory source of truth** for what is blocked.  
-- No reading from disk files (hosts, rules) to determine state.
-- Toggling a category immediately calls `sync_all` which writes `shield_rules.txt` and updates yt-dlp stubs.
-
-### DNS Shield
-- `dns_shield.rs` writes `shield_rules.txt` to all three paths simultaneously:
-  1. `$XDG_RUNTIME_DIR/lvr/shield_rules.txt` (primary — read by `.so`)
-  2. `~/.cache/lvr/shield_rules.txt` (persistent fallback)
-  3. `/tmp/lvr_shield_rules.txt` (last-resort fallback)
-- `liblvr_dns_shield.so` is compiled from `c_src/dns_shield.c` by `build.rs`.
-
-### Hosts File
-**Fully removed.** Do not re-introduce any code that reads or writes the Proton prefix `hosts` file.
-
-### Domain Data Loading Priority
-1. Fresh `~/.cache/lvr/domains.json` (< 1 hour old)
-2. Remote `assets/lists/domains.json` from GitHub
-3. Live VRChat API (`https://api.vrchat.cloud/api/1/config`)
-4. Embedded compile-time fallback (`assets/vrchat_config_fallback.json`)
-
----
-
-## Steam Integration
-- All Steam-related code lives in `src/steam/`.
-- `localconfig.vdf` parsing is in `src/steam/vdf.rs`.
-- DNS Shield install/uninstall controls belong in the **Settings** tab, not the Dashboard.
-
-## UI Conventions
-- Dashboard domain category buttons: show **name + count** only, colored red (blocked) / green (unblocked). No `BLOCKED`/`ALLOWED` text on the button itself (tooltip still has it).
-- Settings "Domains blocked" table shows both **loaded count** and **actually blocked count** with color coding.
-
-## Deploy
-Use `./scripts/build.sh --deploy` (optionally `--no-autostart`).  
-The script runs clippy `-D warnings`, the full test suite, then a release build before installing.
+Run scripts/build.sh --test-only for both projects' checks and the cross-project native
+DNS flow. Wine tests require --wine-test and use a disposable prefix; skipped hardware or
+Wine coverage must be reported. Do not test against a live game prefix or deploy merely to
+verify an audit. Use scripts/build.sh --deploy when deployment is requested.

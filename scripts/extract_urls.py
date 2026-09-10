@@ -1,135 +1,82 @@
+#!/usr/bin/env python3
+"""Extract URLs from explicitly selected local SQLite databases and VRChat logs."""
+import argparse
 import csv
 import glob
-import os
 import re
 import sqlite3
+from contextlib import closing
+from pathlib import Path
+
+QUERIES = (
+    ("SELECT video_url FROM gamelog_video_play WHERE video_url IS NOT NULL", "video"),
+    ("SELECT message FROM events WHERE type = 'video_url' AND message IS NOT NULL", "video"),
+    ("SELECT resource_url, resource_type FROM gamelog_resource_load WHERE resource_url IS NOT NULL", "resource"),
+)
+PATTERNS = {
+    "video": [
+        re.compile(r"\[Video Playback\] (?:Attempting to resolve URL|URL) '([^']+)'"),
+        re.compile(r"\[AVProVideo\] Opening (\S+) \(offset"),
+        re.compile(r"Unsupported URL:\s*(https?://\S+)", re.I),
+    ],
+    "image": [re.compile(r"\[Image Download\] Attempting to load image from URL '([^']+)'")],
+    "string": [re.compile(r"\[String Download\] Attempting to load String from URL '([^']+)'")],
+}
+
 
 def main():
-    out_dir = "/run/media/system/Data/Projects/lvr/.references/urls"
-    os.makedirs(out_dir, exist_ok=True)
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--database", action="append", default=[], type=Path)
+    parser.add_argument("--log", action="append", default=[], help="Log filename or glob")
+    parser.add_argument("--output", type=Path, default=Path(__file__).resolve().parent.parent / ".references/urls")
+    args = parser.parse_args()
+    if not args.database and not args.log:
+        print("No local sources supplied; existing URL lists were left unchanged.")
+        return
+    urls = {category: set() for category in PATTERNS}
 
-    video_urls = set()
-    image_urls = set()
-    string_urls = set()
+    def add(category, value):
+        if isinstance(value, str) and value.strip().startswith(("http://", "https://", "rtsp://", "rtmp://")):
+            urls[category].add(value.strip())
 
-    # 1. Databases to scan
-    dbs = [
-        '/home/blu/.config/VRCX-0/VRCX-0.sqlite3',
-        '/home/blu/.config/VRCNext/VRCNData.db',
-        '/run/media/system/Data/OneDrive/Games/VRChat/_TOOLS/VRCX/AppData/VRCX/VRCX.sqlite3',
-        '/run/media/system/Data/OneDrive/Games/VRChat/_TOOLS/VRCX/AppData/VRCX/VRCX - Copy.sqlite3',
-        '/run/media/system/Data/OneDrive/Games/VRChat/_TOOLS/VRCX/AppData/VRCX/VRCX - Copy (2).sqlite3',
-        '/run/media/system/Data/OneDrive/Games/VRChat/_TOOLS/VRCX/AppData/VRCX/VRCX - Copy (3).sqlite3',
-        '/run/media/system/Data/OneDrive/Games/VRChat/_TOOLS/VRCX/AppData/VRCX/VRCX-Bluscream-PC - Copy.sqlite3',
-        '/run/media/system/Data/OneDrive/Games/VRChat/_TOOLS/VRCX/AppData/VRCX/VRCX-Bluscream-PC-2.sqlite3',
-        '/run/media/system/Data/OneDrive/Games/VRChat/_TOOLS/VRCX/AppData/VRCX/VRCX-Bluscream-PC-3.sqlite3',
-        '/run/media/system/Data/OneDrive/Games/VRChat/_TOOLS/VRCX/AppData/VRCX-0/VRCX-0.sqlite3'
-    ]
+    for database in args.database:
+        # URI read-only mode neither creates a missing database nor takes a write lock.
+        with closing(sqlite3.connect(database.resolve().as_uri() + "?mode=ro", uri=True)) as connection:
+            for query, category in QUERIES:
+                try:
+                    for row in connection.execute(query):
+                        if category == "resource":
+                            kind = {"ImageLoad": "image", "StringLoad": "string"}.get(row[1])
+                            if kind:
+                                add(kind, row[0])
+                        else:
+                            add(category, row[0])
+                except sqlite3.OperationalError as error:
+                    if "no such table" not in str(error):
+                        raise
+                    print(f"Skipping unavailable table in {database.name}: {error}")
+    for pattern in args.log:
+        matches = sorted(glob.glob(pattern))
+        if not matches:
+            raise FileNotFoundError(f"No logs matched {pattern}")
+        for filename in matches:
+            with open(filename, encoding="utf-8", errors="replace") as source:
+                for line in source:
+                    for category, patterns in PATTERNS.items():
+                        for regex in patterns:
+                            if match := regex.search(line):
+                                add(category, match.group(1))
+    args.output.mkdir(parents=True, exist_ok=True)
+    for category, values in urls.items():
+        path = args.output / f"{category}.csv"
+        temporary = path.with_suffix(".csv.tmp")
+        with temporary.open("w", newline="", encoding="utf-8") as output:
+            writer = csv.writer(output)
+            writer.writerow(["url"])
+            writer.writerows([value] for value in sorted(values))
+        temporary.replace(path)
+        print(f"Wrote {len(values)} {category} URLs to {path}")
 
-    for db_path in dbs:
-        if not os.path.exists(db_path):
-            continue
-        print(f"Reading DB: {db_path}")
-        try:
-            conn = sqlite3.connect(db_path)
-            c = conn.cursor()
 
-            # VRCX video table
-            try:
-                for row in c.execute("SELECT video_url FROM gamelog_video_play WHERE video_url IS NOT NULL AND video_url != ''"):
-                    u = row[0].strip()
-                    if u.startswith(('http://', 'https://', 'rtsp://', 'rtmp://')):
-                        video_urls.add(u)
-            except Exception:
-                pass
-
-            # VRCNext events table for video_url
-            try:
-                for row in c.execute("SELECT message FROM events WHERE type = 'video_url' AND message IS NOT NULL AND message != ''"):
-                    u = row[0].strip()
-                    if u.startswith(('http://', 'https://', 'rtsp://', 'rtmp://')):
-                        video_urls.add(u)
-            except Exception:
-                pass
-
-            # VRCX resource table (Udon string & image loads)
-            try:
-                for row in c.execute("SELECT resource_url, resource_type FROM gamelog_resource_load WHERE resource_url IS NOT NULL AND resource_url != ''"):
-                    u, rtype = row[0].strip(), (row[1] or '').strip()
-                    if not u.startswith(('http://', 'https://')):
-                        continue
-                    if rtype == 'ImageLoad':
-                        image_urls.add(u)
-                    elif rtype == 'StringLoad':
-                        string_urls.add(u)
-            except Exception:
-                pass
-
-            conn.close()
-        except Exception as e:
-            print(f"Error reading DB {db_path}: {e}")
-
-    # 2. VRChat logs to scan
-    log_globs = [
-        '/run/media/system/Data/Games/Steam/steamapps/compatdata/438100/pfx/drive_c/users/steamuser/AppData/LocalLow/VRChat/VRChat/output_log*.txt',
-        '/run/media/system/Data/Users/Bluscream/AppData/LocalLow/VRChat/vrchat/logs/output_log*.txt',
-        '/run/media/system/Data/Users/Bluscream/AppData/LocalLow/VRChat/vrchat/output_log*.txt'
-    ]
-
-    log_files = []
-    for g in log_globs:
-        log_files.extend(glob.glob(g))
-
-    print(f"Scanning {len(log_files)} log files...")
-
-    video_patterns = [
-        re.compile(r'\[Video Playback\] Attempting to resolve URL \'([^\']+)\''),
-        re.compile(r'\[Video Playback\] URL \'([^\']+)\' resolved to'),
-        re.compile(r'\[AVProVideo\] Opening ([^\s]+) \(offset'),
-        re.compile(r'User .+ (?:played|loaded|started) video:?\s*(https?://[^\s\'"]+)', re.I),
-        re.compile(r'Could not send HEAD request to (https?://[^\s:]+)', re.I),
-        re.compile(r'Unsupported URL:\s*(https?://[^\s]+)', re.I),
-    ]
-
-    str_pattern = re.compile(r'\[String Download\] Attempting to load String from URL \'([^\']+)\'')
-    img_pattern = re.compile(r'\[Image Download\] Attempting to load image from URL \'([^\']+)\'')
-
-    for log_file in log_files:
-        try:
-            with open(log_file, 'r', encoding='utf-8', errors='ignore') as f:
-                for line in f:
-                    for vp in video_patterns:
-                        m = vp.search(line)
-                        if m:
-                            u = m.group(1).strip()
-                            if u.startswith(('http://', 'https://')):
-                                video_urls.add(u)
-                    ms = str_pattern.search(line)
-                    if ms:
-                        u = ms.group(1).strip()
-                        if u.startswith(('http://', 'https://')):
-                            string_urls.add(u)
-                    mi = img_pattern.search(line)
-                    if mi:
-                        u = mi.group(1).strip()
-                        if u.startswith(('http://', 'https://')):
-                            image_urls.add(u)
-        except Exception as e:
-            print(f"Error reading log {log_file}: {e}")
-
-    # 3. Write output CSVs
-    def write_csv(filepath, url_set):
-        sorted_urls = sorted(url_set)
-        with open(filepath, 'w', newline='', encoding='utf-8') as f:
-            writer = csv.writer(f)
-            writer.writerow(['url'])
-            for u in sorted_urls:
-                writer.writerow([u])
-        print(f"Wrote {len(sorted_urls)} unique URLs to {filepath}")
-
-    write_csv(os.path.join(out_dir, "video.csv"), video_urls)
-    write_csv(os.path.join(out_dir, "image.csv"), image_urls)
-    write_csv(os.path.join(out_dir, "string.csv"), string_urls)
-
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()

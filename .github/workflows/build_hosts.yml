@@ -9,6 +9,10 @@ on:
 permissions:
   contents: write
 
+concurrency:
+  group: blocklist-update
+  cancel-in-progress: false
+
 jobs:
   build-hosts:
     runs-on: ubuntu-latest
@@ -29,10 +33,10 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add assets/lists/hosts/*.hosts assets/lists/all.hosts assets/lists/domains.json assets/lists/community.json
+          git add assets/lists/domains.json
           if git diff --staged --quiet; then
-            echo "No changes in hosts or domain lists."
+            echo "No changes in domain lists."
           else
-            git commit -m "Auto-update pre-filtered category hosts files [skip ci]"
+            git commit -m "build: update categorized domain bundle [skip ci]"
             git push origin main
           fi

@@ -1,8 +1,7 @@
 #!/usr/bin/env python3
 import csv
 import json
-import os
-import re
+import ipaddress
 import urllib.parse
 from pathlib import Path
 
@@ -21,7 +20,6 @@ BLACKLIST_DOMAINS = {
     "dbinj8iahsbec.cloudfront.net"
 }
 
-IP_REGEX = re.compile(r"^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$")
 
 
 def is_blacklisted(domain: str) -> bool:
@@ -38,7 +36,7 @@ def extract_domain(raw_url: str) -> str | None:
     raw_url = raw_url.strip()
     try:
         parsed = urllib.parse.urlparse(raw_url)
-        netloc = parsed.netloc.strip().lower()
+        netloc = (parsed.hostname or "").strip().lower()
         if not netloc:
             return None
         # Remove port if present (e.g. 1.2.3.4:8080 or example.com:8443)
@@ -48,8 +46,11 @@ def extract_domain(raw_url: str) -> str | None:
         if not netloc:
             return None
         # Never treat IP addresses as blockable domains
-        if IP_REGEX.match(netloc):
+        try:
+            ipaddress.ip_address(netloc)
             return None
+        except ValueError:
+            pass
         return netloc
     except Exception:
         return None
@@ -84,22 +85,20 @@ def update_config_json(data: dict[str, list[str]], config_path: Path) -> None:
 
     config = {}
     if config_path.exists():
-        try:
-            with open(config_path, "r", encoding="utf-8") as f:
-                config = json.load(f)
-        except Exception:
-            config = {}
+        with open(config_path, "r", encoding="utf-8") as source:
+            config = json.load(source)
+        if not isinstance(config, dict):
+            raise ValueError("Community config must be an object")
 
-    # urlList represents video streaming domains
-    config["imageHostUrlList"] = data["image"]
-    config["stringHostUrlList"] = data["string"]
-    config["urlList"] = data["video"]
-
-    with open(config_path, "w", encoding="utf-8") as f:
-        json.dump(config, f, indent=2)
-        f.write("\n")
-
-    print(f"Updated config JSON at: {config_path} (urlList: {len(data['video'])}, image: {len(data['image'])}, string: {len(data['string'])})")
+    keys = {"image": "imageHostUrlList", "string": "stringHostUrlList", "video": "urlList"}
+    for category, values in data.items():
+        config[keys[category]] = values
+    temporary = config_path.with_suffix(".json.tmp")
+    with temporary.open("w", encoding="utf-8") as output:
+        json.dump(config, output, indent=2)
+        output.write("\n")
+    temporary.replace(config_path)
+    print(f"Updated {len(data)} supplied categories in {config_path}")
 
 
 def main():
@@ -110,6 +109,8 @@ def main():
 
     for cat in categories:
         csv_file = URLS_DIR / f"{cat}.csv"
+        if not csv_file.is_file():
+            continue
         urls = read_urls_from_csv(csv_file)
 
         domains = set()
@@ -127,7 +128,10 @@ def main():
         write_reference_domain_csv(ref_csv, sorted_domains)
 
     # Output assets/lists/community.json
-    update_config_json(domain_data, CONFIG_JSON_PATH)
+    if domain_data:
+        update_config_json(domain_data, CONFIG_JSON_PATH)
+    else:
+        print("No URL CSVs supplied; community config left unchanged.")
 
 
 if __name__ == "__main__":

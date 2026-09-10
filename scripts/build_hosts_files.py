@@ -1,32 +1,12 @@
 #!/usr/bin/env python3
-"""
-Build and compile pre-filtered, mutually exclusive domains.json on the build box / CI.
+"""Build the public categorized domain bundle from official and community inputs.
 
-Pipeline:
-1. Fetches official VRChat remote config from https://api.vrchat.cloud/api/1/config
-   (falling back to assets/vrchat_config_fallback.json if network is unavailable).
-2. Optionally invokes scripts/extract_urls.py if local databases or logs are present.
-3. Invokes scripts/convert_urls.py to process raw URLs into .references/domains and update community.json.
-4. Reads assets/lists/community.json.
-5. Ingests all domains across Official and Community categories:
-   - "urlList" -> Video
-   - "imageHostUrlList" -> Images
-   - "stringHostUrlList" -> Strings
-   - Any custom community keys (e.g. "Analytics") -> Custom category name
-6. Filters out protected core VRChat domains and whiteListedAssetUrls.
-7. Enforces mutual exclusivity: any domain that appears in >= 2 categories is removed from
-   those categories and assigned exclusively to the "Shared" category.
-8. Writes out assets/lists/domains.json containing all blocklists in a single flat JSON.
+Local URL extraction/conversion must be invoked explicitly; publishing never scans
+personal history. Protected domains are filtered and shared families are separated.
 """
 
-import csv
 import ipaddress
 import json
-import os
-import re
-import subprocess
-import sys
-import urllib.parse
 import urllib.request
 from collections import defaultdict
 from pathlib import Path
@@ -44,6 +24,8 @@ PROTECTED_CORE_DOMAINS = {
     "assets.vrchat.com",
     "vrchat.com",
     "vrchat.cloud",
+    "vrchat.net",
+    "d348imysud55la.cloudfront.net",
     "dbinj8iahsbec.cloudfront.net",
 }
 
@@ -114,43 +96,21 @@ def fetch_vrchat_config() -> dict:
         if FALLBACK_CONFIG_PATH.exists():
             with open(FALLBACK_CONFIG_PATH, "r", encoding="utf-8") as f:
                 return json.load(f)
-        return {}
+        raise RuntimeError("Neither live nor bundled VRChat configuration is available")
 
 
 def is_protected(domain: str, protected_set: set[str]) -> bool:
     bare = domain.lstrip("*.")
     if bare in protected_set or f"*.{bare}" in protected_set or domain in protected_set:
         return True
-    for core in PROTECTED_CORE_DOMAINS:
-        if bare == core or bare.endswith(f".{core}"):
+    for core in protected_set:
+        if bare == core or bare.endswith(f".{core}") or (domain.startswith("*.") and core.endswith(f".{bare}")):
             return True
     return False
 
 
-def run_helper_scripts():
-    extract_py = SCRIPTS_DIR / "extract_urls.py"
-    convert_py = SCRIPTS_DIR / "convert_urls.py"
-
-    # Only run extract_urls if extract script exists and there are local DBs / logs to scan
-    if extract_py.exists():
-        try:
-            print("Running extract_urls.py...")
-            subprocess.run([sys.executable, str(extract_py)], check=True, cwd=str(PROJECT_ROOT))
-        except Exception as e:
-            print(f"[WARN] extract_urls.py step skipped or encountered error: {e}")
-
-    if convert_py.exists():
-        try:
-            print("Running convert_urls.py...")
-            subprocess.run([sys.executable, str(convert_py)], check=True, cwd=str(PROJECT_ROOT))
-        except Exception as e:
-            print(f"[WARN] convert_urls.py step encountered error: {e}")
-
-
 def main():
-    # 1. Run local extraction & conversion scripts if available
-    run_helper_scripts()
-
+    # Local history extraction is explicitly invoked by the user, never by publishing CI.
     # 2. Fetch official config
     vrc_config = fetch_vrchat_config()
 
@@ -195,11 +155,11 @@ def main():
     for key, val in community_config.items():
         if key.startswith("$") or not isinstance(val, list):
             continue
-        if key in ("urlList", "Videos", "video", "videos"):
+        if key in ("urlList", "Videos"):
             cat = "Videos"
-        elif key in ("imageHostUrlList", "Images", "image", "images"):
+        elif key in ("imageHostUrlList", "Images"):
             cat = "Images"
-        elif key in ("stringHostUrlList", "Strings", "string", "strings"):
+        elif key in ("stringHostUrlList", "Strings"):
             cat = "Strings"
         elif key in ("whiteListedAssetUrls",):
             continue
@@ -252,9 +212,11 @@ def main():
         for cat in sorted(final_categories.keys())
     }
 
-    with open(domains_json_path, "w", encoding="utf-8") as f:
+    temporary = domains_json_path.with_suffix(".json.tmp")
+    with open(temporary, "w", encoding="utf-8") as f:
         json.dump(domains_json_data, f, indent=2)
         f.write("\n")
+    temporary.replace(domains_json_path)
 
     print(f"\nGenerated unified domains bundle at: {domains_json_path} ({len(domains_json_data)} categories)")
     for cat, d_list in sorted(domains_json_data.items()):

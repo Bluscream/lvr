@@ -1,0 +1,35 @@
+name: Verify LinuxVR
+on:
+  push:
+    branches: [main]
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: lvr
+      - uses: actions/checkout@v4
+        with:
+          repository: Bluscream/getaddrinfo-rs
+          path: getaddrinfo-rs
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+      - name: Desktop build dependencies
+        run: sudo apt-get update && sudo apt-get install -y libxkbcommon-dev libwayland-dev libegl1-mesa-dev shellcheck
+      - name: Verify both projects and native DNS integration
+        working-directory: lvr
+        run: ./scripts/build.sh --test-only --skip-wine-test
+      - name: Shell validation
+        working-directory: lvr
+        run: shellcheck scripts/build.sh ../getaddrinfo-rs/scripts/build.sh
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+      - name: Build optional Windows diagnostic
+        working-directory: lvr
+        run: dotnet build tests/dns_test/dns_test.csproj --configuration Release
