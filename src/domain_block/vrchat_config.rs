@@ -1,5 +1,5 @@
-use std::collections::{BTreeMap, HashSet};
 use anyhow::Result;
+use std::collections::{BTreeMap, HashSet};
 
 /// Official VRChat remote config endpoint.
 pub const VRCHAT_CONFIG_URL: &str = "https://api.vrchat.cloud/api/1/config";
@@ -20,7 +20,7 @@ pub const PROTECTED_CORE_DOMAINS: &[&str] = &[
     "files.vrchat.cloud",
     "pipeline.vrchat.cloud",
     "static.vrchat.com",
-    "vrchat.com",
+    "dbinj8iahsbec.cloudfront.net",
     "websocket.vrchat.com",
 ];
 
@@ -71,7 +71,7 @@ pub fn clean_domain(raw: &str) -> String {
     s.trim_end_matches('.').to_lowercase()
 }
 
-fn is_valid_domain(d: &str) -> bool {
+pub fn is_valid_domain(d: &str) -> bool {
     let bare = d.trim_start_matches("*.");
     if bare.is_empty()
         || bare.starts_with('.')
@@ -88,16 +88,28 @@ fn is_valid_domain(d: &str) -> bool {
     if bare.starts_with("vrc.") || bare.starts_with("unityengine.") || bare.starts_with("system.") {
         return false;
     }
-    true
+    bare.len() <= 253
+        && bare.split('.').all(|label| {
+            !label.is_empty()
+                && label.len() <= 63
+                && !label.starts_with('-')
+                && !label.ends_with('-')
+                && label
+                    .bytes()
+                    .all(|c| c.is_ascii_alphanumeric() || c == b'-' || c == b'_')
+        })
 }
 
-fn is_protected(domain: &str, protected_set: &HashSet<String>) -> bool {
+pub fn is_protected(domain: &str, protected_set: &HashSet<String>) -> bool {
     let bare = domain.trim_start_matches("*.");
     if protected_set.contains(bare) || protected_set.contains(domain) {
         return true;
     }
-    for core in PROTECTED_CORE_DOMAINS {
-        if bare == *core || bare.ends_with(&format!(".{core}")) {
+    for core in protected_set {
+        if bare == core
+            || bare.ends_with(&format!(".{core}"))
+            || (domain.starts_with("*.") && core.ends_with(&format!(".{bare}")))
+        {
             return true;
         }
     }
@@ -110,12 +122,15 @@ fn is_protected(domain: &str, protected_set: &HashSet<String>) -> bool {
 /// - Strings: from `stringHostUrlList`
 /// - Shared: Any domain appearing in >1 category
 ///
-/// Automatically expands wildcards `*.domain.tld` into `domain.tld` and `www.domain.tld`.
+/// Keeps wildcard entries intact; shared domain families remain in Shared.
 pub fn parse_vrchat_config_to_categories(json_str: &str) -> Result<BTreeMap<String, Vec<String>>> {
     let root: serde_json::Value = serde_json::from_str(json_str)?;
 
     // 1. Gather protected assets
-    let mut protected: HashSet<String> = PROTECTED_CORE_DOMAINS.iter().map(|s| s.to_string()).collect();
+    let mut protected: HashSet<String> = PROTECTED_CORE_DOMAINS
+        .iter()
+        .map(|s| s.to_string())
+        .collect();
     if let Some(assets) = root.get("whiteListedAssetUrls").and_then(|v| v.as_array()) {
         for item in assets {
             if let Some(s) = item.as_str() {

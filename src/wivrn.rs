@@ -63,9 +63,15 @@ impl WivrnClient {
 
     async fn connection(&mut self) -> Result<&Connection> {
         if self.connection.is_none() {
-            let connection = Connection::session()
-                .await
-                .context("connecting to the session D-Bus")?;
+            let connection = tokio::time::timeout(
+                Duration::from_secs(5),
+                zbus::connection::Builder::session()?
+                    .method_timeout(Duration::from_secs(5))
+                    .build(),
+            )
+            .await
+            .context("session D-Bus connection timed out after 5s")?
+            .context("connecting to the session D-Bus")?;
             self.connection = Some(connection);
         }
         Ok(self.connection.as_ref().expect("just connected"))

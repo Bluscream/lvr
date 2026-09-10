@@ -1,0 +1,15 @@
+[Unit]
+Description=LinuxVR session companion
+After=graphical-session.target
+PartOf=graphical-session.target
+
+[Service]
+Type=notify
+ExecStart=%h/.local/bin/lvr --hidden
+Restart=on-failure
+RestartSec=5
+WatchdogSec=180
+TimeoutStopSec=15
+
+[Install]
+WantedBy=graphical-session.target

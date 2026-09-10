@@ -2,7 +2,6 @@
 
 use std::fs;
 use std::path::Path;
-use std::process::Command;
 
 fn main() {
     let out_dir = std::env::var("OUT_DIR").expect("OUT_DIR must be set");
@@ -10,76 +9,18 @@ fn main() {
     register_rerun_triggers();
     check_no_legacy_code();
     check_file_lengths();
-    fetch_vrchat_config(&out_dir);
-    compile_dns_shield(&out_dir);
+    fs::copy(
+        "assets/vrchat_config_fallback.json",
+        Path::new(&out_dir).join("vrchat_config_fallback.json"),
+    )
+    .expect("copying bundled VRChat fallback");
 }
 
 /// Tells Cargo which files should trigger a rebuild.
 fn register_rerun_triggers() {
     println!("cargo:rerun-if-changed=build.rs");
     println!("cargo:rerun-if-changed=assets/vrchat_config_fallback.json");
-    println!("cargo:rerun-if-changed=c_src/dns_shield.c");
     println!("cargo:rerun-if-changed=src");
-}
-
-/// Fetches the latest VRChat remote config at compile time when network is
-/// available, falling back to the bundled offline fallback otherwise.
-fn fetch_vrchat_config(out_dir: &str) {
-    let target_path = Path::new(out_dir).join("vrchat_config_fallback.json");
-    let bundled_fallback = Path::new("assets/vrchat_config_fallback.json");
-
-    let fetched = Command::new("curl")
-        .args([
-            "-s",
-            "--max-time",
-            "5",
-            "-A",
-            "lvr-builder/0.1.0",
-            "https://api.vrchat.cloud/api/1/config",
-        ])
-        .output()
-        .ok()
-        .filter(|out| out.status.success())
-        .and_then(|out| String::from_utf8(out.stdout).ok())
-        .filter(|text| text.contains("\"urlList\""))
-        .filter(|text| serde_json::from_str::<serde_json::Value>(text).is_ok())
-        .and_then(|text| fs::write(&target_path, &text).ok().map(|_| text));
-
-    if fetched.is_none() {
-        let fallback = fs::read_to_string(bundled_fallback)
-            .expect("bundled fallback config must exist in assets/");
-        fs::write(&target_path, fallback).expect("writing fallback config to OUT_DIR");
-    }
-}
-
-/// Compiles `c_src/dns_shield.c` into `liblvr_dns_shield.so` and embeds it.
-fn compile_dns_shield(out_dir: &str) {
-    let shim_src = Path::new("c_src/dns_shield.c");
-    let shim_out = Path::new(out_dir).join("liblvr_dns_shield.so");
-
-    let ok = Command::new("gcc")
-        .args([
-            "-shared",
-            "-fPIC",
-            "-O3",
-            "-Wall",
-            "-Wextra",
-            shim_src.to_str().unwrap(),
-            "-o",
-            shim_out.to_str().unwrap(),
-            "-ldl",
-            "-lpthread",
-        ])
-        .status()
-        .map(|st| st.success())
-        .unwrap_or(false);
-
-    if !ok {
-        panic!("Failed to compile liblvr_dns_shield.so with gcc");
-    }
-
-    // Also copy to c_src/ for repository-local tests
-    let _ = fs::copy(&shim_out, "c_src/liblvr_dns_shield.so");
 }
 
 /// Fails the build if any `.rs` file in `src/` exceeds 1000 lines.

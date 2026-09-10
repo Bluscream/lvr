@@ -5,15 +5,17 @@
 mod audio;
 mod config;
 mod display;
+mod domain_block;
 mod engine;
+mod files;
 mod icon;
 mod ipc;
 mod procs;
 mod state;
+mod steam;
+mod systemd;
 mod tray;
 mod ui;
-mod domain_block;
-mod steam;
 mod wivrn;
 
 use std::path::{Path, PathBuf};
@@ -139,22 +141,21 @@ fn main() -> Result<()> {
 
     // A second supervisor would fight the first one over every process, so a
     // second launch just raises the window of the one already running.
-    let listener = match ipc::acquire(&ipc::show_request(args.tab.as_deref())) {
-        ipc::Acquired::Listener(listener) => Some(listener),
+    ensure_display_environment();
+    let (listener, _instance_lock) = match ipc::acquire(&ipc::show_request(args.tab.as_deref())) {
+        ipc::Acquired::Listener(listener, lock) => (Some(listener), Some(lock)),
         ipc::Acquired::AlreadyRunning => {
             println!("lvr is already running — raising its window.");
             return Ok(());
         }
         ipc::Acquired::Unavailable(err) => {
-            tracing::warn!("single-instance socket unavailable: {err:#}");
-            None
+            return Err(err).context("Cannot safely start the single LinuxVR supervisor");
         }
     };
 
-    ensure_display_environment();
-
-    let start_hidden = args.hidden.unwrap_or(config.general.start_hidden);
+    let start_hidden = !args.no_tray && args.hidden.unwrap_or(config.general.start_hidden);
     let (shared, rx) = Shared::new(config, config_path.clone());
+    shared.set_tray_available(!args.no_tray);
     shared.info(format!("Config: {}", config_path.display()));
 
     if let Some(listener) = listener {
@@ -184,6 +185,9 @@ fn main() -> Result<()> {
         anyhow::bail!("GUI failed: {err}");
     }
     ipc::cleanup();
+    if shared.supervisor_failed() {
+        anyhow::bail!("Supervisor stopped unexpectedly; see logs");
+    }
     tracing::info!("bye");
     // The tray's D-Bus task can still be parked; exit decisively.
     std::process::exit(0);
@@ -223,6 +227,10 @@ fn handle_cli_command(args: &Args, config: &Config, config_path: &Path) -> Resul
             anyhow::bail!("nothing to switch — check the audio devices in your config");
         }
         println!("{}", outcome.summary());
+        anyhow::ensure!(
+            outcome.errors.is_empty(),
+            "audio routing was only partially successful"
+        );
         return Ok(true);
     }
 
@@ -276,17 +284,27 @@ fn spawn_worker(
                 Ok(runtime) => runtime,
                 Err(err) => {
                     tracing::error!("could not start the tokio runtime: {err}");
+                    shared.mark_supervisor_failed();
                     let _ = done_tx.send(());
                     return;
                 }
             };
-            runtime.block_on(async {
-                let tray_task = with_tray.then(|| tokio::spawn(tray::run(shared.clone())));
-                engine::Engine::new(shared, rx).run().await;
-                if let Some(task) = tray_task {
-                    task.abort();
-                }
-            });
+            let worker_shared = shared.clone();
+            let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                runtime.block_on(async {
+                    let tray_task = with_tray.then(|| tokio::spawn(tray::run(shared.clone())));
+                    engine::Engine::new(worker_shared, rx).run().await;
+                    if let Some(task) = tray_task {
+                        task.abort();
+                    }
+                })
+            }));
+            if outcome.is_err() || !shared.is_quitting() {
+                shared.error(
+                    "Supervisor exited unexpectedly; shutting down LinuxVR so it can be restarted",
+                );
+                shared.mark_supervisor_failed();
+            }
             // Do not wait for lingering D-Bus tasks on shutdown.
             runtime.shutdown_timeout(Duration::from_millis(500));
             let _ = done_tx.send(());
@@ -314,13 +332,18 @@ fn ensure_display_environment() {
     for _ in 0..75 {
         // If WAYLAND_DISPLAY is already set, check if the socket exists
         if let Ok(wayland_display) = std::env::var("WAYLAND_DISPLAY")
-            && runtime_path.join(&wayland_display).exists() {
-                return;
-            }
+            && runtime_path.join(&wayland_display).exists()
+        {
+            return;
+        }
 
         // If DISPLAY is already set, check if the X11 socket exists
         if let Ok(display_var) = std::env::var("DISPLAY") {
-            let num = display_var.trim_start_matches(':').split('.').next().unwrap_or("0");
+            let num = display_var
+                .trim_start_matches(':')
+                .split('.')
+                .next()
+                .unwrap_or("0");
             if std::path::Path::new(&format!("/tmp/.X11-unix/X{num}")).exists() {
                 return;
             }
@@ -360,7 +383,9 @@ fn ensure_display_environment() {
             std::env::set_var("WAYLAND_DISPLAY", "wayland-0");
             std::env::set_var("DISPLAY", ":0");
         }
-        tracing::warn!("Display socket not detected; defaulted WAYLAND_DISPLAY=wayland-0, DISPLAY=:0");
+        tracing::warn!(
+            "Display socket not detected; defaulted WAYLAND_DISPLAY=wayland-0, DISPLAY=:0"
+        );
     }
 }
 

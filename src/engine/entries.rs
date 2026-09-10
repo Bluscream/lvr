@@ -250,6 +250,7 @@ impl Engine {
                     .error(format!("Starting {} failed: {message}", entry.name_or_id()));
                 if let Some(runtime) = self.runtimes.get_mut(&entry.id) {
                     runtime.last_error = Some(message);
+                    runtime.launched_this_cycle = false;
                 }
             }
         }
@@ -314,6 +315,14 @@ impl Engine {
             self.shared.warn(format!("Unknown entry `{id}`"));
             return;
         };
+        let snapshot = self.scanner.scan();
+        if self.children.live_pid(id).is_some()
+            || snapshot.any_matching(&entry.effective_patterns(), &[])
+        {
+            self.shared
+                .info(format!("{} is already running", entry.name_or_id()));
+            return;
+        }
         {
             let runtime = self.runtimes.entry(entry.id.clone()).or_default();
             runtime.suppressed = false;

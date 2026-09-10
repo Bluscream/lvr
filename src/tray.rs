@@ -294,12 +294,12 @@ pub async fn run(shared: Shared) {
     {
         Ok(handle) => handle,
         Err(err) => {
-            shared.warn(format!(
-                "Tray unavailable ({err}); continuing without a tray icon"
-            ));
+            shared.warn(format!("Tray unavailable ({err}); opening the window"));
+            shared.set_tray_available(false);
             return;
         }
     };
+    shared.set_tray_available(true);
     shared.info("Tray icon registered");
 
     let mut previous = shared.status_snapshot();
@@ -317,6 +317,7 @@ pub async fn run(shared: Shared) {
                 .await
                 .is_none()
             {
+                shared.set_tray_available(false);
                 return;
             }
         }

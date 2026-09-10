@@ -1,8 +1,8 @@
 //! Steam KeyValues / VDF text parsing and in-place editing utilities.
 
+use anyhow::{Context, Result, anyhow};
 use std::fs;
 use std::path::Path;
-use anyhow::{Context, Result, anyhow};
 
 /// Replace a value in a Steam VDF file located at `key_path`.
 /// Creates an atomic temporary file before renaming to ensure data integrity.
@@ -14,10 +14,8 @@ pub fn edit_vdf(path: &Path, key_path: &[&str], value: &str) -> Result<()> {
         return Ok(());
     }
     let backup = path.with_extension("vdf.lvr.bak");
-    let _ = fs::write(&backup, &text);
-    let tmp = path.with_extension("vdf.lvr.tmp");
-    fs::write(&tmp, &updated).with_context(|| format!("writing {}", tmp.display()))?;
-    fs::rename(&tmp, path).with_context(|| format!("replacing {}", path.display()))?;
+    crate::files::atomic_write(&backup, text.as_bytes())?;
+    crate::files::atomic_write(path, updated.as_bytes())?;
     Ok(())
 }
 
@@ -36,8 +34,91 @@ pub fn replace_value(text: &str, key_path: &[&str], value: &str) -> Option<Strin
         out.push_str(&text[end..]);
         Some(out)
     } else {
-        None
+        let (key, parent) = key_path.split_last()?;
+        let end = block_end(text, parent)?;
+        let mut out = text.to_string();
+        out.insert_str(
+            end,
+            &format!("\n\t\t\t\t\t\"{}\" \"{}\"\n", escape(key), escape(value)),
+        );
+        Some(out)
     }
+}
+
+/// Locate the closing brace of an existing object, for inserting a missing value.
+fn block_end(text: &str, path: &[&str]) -> Option<usize> {
+    if path.is_empty() {
+        return None;
+    }
+    let bytes = text.as_bytes();
+    let (mut index, mut matched) = (0, 0);
+    let mut stack = Vec::new();
+    let mut pending = None;
+    while index < bytes.len() {
+        match bytes[index] {
+            b'"' => {
+                let (token, _, end) = read_string(text, index)?;
+                index = end;
+                if pending.take().is_none() {
+                    pending = Some(token);
+                }
+            }
+            b'{' => {
+                let key = pending.take().unwrap_or_default();
+                stack.push(matched);
+                if matched < path.len() && key.eq_ignore_ascii_case(path[matched]) {
+                    matched += 1;
+                }
+                index += 1;
+            }
+            b'}' => {
+                let previous = stack.pop()?;
+                if matched == path.len() && previous < matched {
+                    return Some(index);
+                }
+                matched = previous;
+                pending = None;
+                index += 1;
+            }
+            b'/' if bytes.get(index + 1) == Some(&b'/') => {
+                index += text[index..]
+                    .find('\n')
+                    .map_or(bytes.len() - index, |n| n + 1);
+            }
+            _ => index += 1,
+        }
+    }
+    None
+}
+
+/// Read repeated leaf values, e.g. libraryfolders' path fields.
+pub fn values_for_key(text: &str, key: &str) -> Vec<String> {
+    let mut index = 0;
+    let mut result = Vec::new();
+    while index < text.len() {
+        if text.as_bytes()[index] == b'"' {
+            let Some((token, _, end)) = read_string(text, index) else {
+                break;
+            };
+            index = end;
+            if token.eq_ignore_ascii_case(key) {
+                while text
+                    .as_bytes()
+                    .get(index)
+                    .is_some_and(u8::is_ascii_whitespace)
+                {
+                    index += 1;
+                }
+                if let Some((value, _, end)) = read_string(text, index) {
+                    result.push(value);
+                    index = end;
+                }
+            }
+        } else {
+            index += 1;
+        }
+    }
+    result
 }
 
 /// Walk a Steam text VDF and return the byte range of the value belonging to
@@ -45,6 +126,9 @@ pub fn replace_value(text: &str, key_path: &[&str], value: &str) -> Option<Strin
 /// path may skip intermediate levels, so `["apps", "438100", "LaunchOptions"]`
 /// finds the key wherever the `apps` block happens to sit.
 pub fn value_span(text: &str, key_path: &[&str]) -> Option<(usize, usize)> {
+    if key_path.is_empty() {
+        return None;
+    }
     let bytes = text.as_bytes();
     let mut index = 0usize;
     let mut stack: Vec<usize> = Vec::new();
@@ -81,7 +165,10 @@ pub fn value_span(text: &str, key_path: &[&str]) -> Option<(usize, usize)> {
                 index += 1;
             }
             b'/' if bytes.get(index + 1) == Some(&b'/') => {
-                index += text[index..].find('\n').map(|n| n + 1).unwrap_or(bytes.len() - index);
+                index += text[index..]
+                    .find('\n')
+                    .map(|n| n + 1)
+                    .unwrap_or(bytes.len() - index);
             }
             _ => index += 1,
         }
@@ -93,32 +180,17 @@ pub fn value_span(text: &str, key_path: &[&str]) -> Option<(usize, usize)> {
 /// opening-quote offset, offset just past the closing quote).
 pub fn read_string(text: &str, index: usize) -> Option<(String, usize, usize)> {
     let bytes = text.as_bytes();
-    let mut out = String::new();
+    if bytes.get(index) != Some(&b'"') {
+        return None;
+    }
     let mut cursor = index + 1;
     while cursor < bytes.len() {
         match bytes[cursor] {
             b'\\' => {
-                cursor += 1;
-                if cursor >= bytes.len() {
-                    return None;
-                }
-                match bytes[cursor] {
-                    b'n' => out.push('\n'),
-                    b't' => out.push('\t'),
-                    b'\\' => out.push('\\'),
-                    b'"' => out.push('"'),
-                    other => {
-                        out.push('\\');
-                        out.push(other as char);
-                    }
-                }
-                cursor += 1;
+                cursor += 2;
             }
-            b'"' => return Some((out, index, cursor + 1)),
-            byte => {
-                out.push(byte as char);
-                cursor += 1;
-            }
+            b'"' => return Some((unescape(&text[index + 1..cursor]), index, cursor + 1)),
+            _ => cursor += 1,
         }
     }
     None
@@ -239,17 +311,26 @@ mod tests {
             find_value(LOCAL, &["apps", "620980", "LaunchOptions"]).as_deref(),
             Some("%command% --other")
         );
-        assert_eq!(find_value(CONFIG, &["CompatToolMapping", "999", "name"]), None);
+        assert_eq!(
+            find_value(CONFIG, &["CompatToolMapping", "999", "name"]),
+            None
+        );
     }
 
     #[test]
     fn replacing_a_value_touches_nothing_else() {
-        let updated =
-            replace_value(CONFIG, &["CompatToolMapping", "438100", "name"], "Proton-GE RTSP Latest")
-                .expect("entry exists");
+        let updated = replace_value(
+            CONFIG,
+            &["CompatToolMapping", "438100", "name"],
+            "Proton-GE RTSP Latest",
+        )
+        .expect("entry exists");
         assert!(updated.contains(r#""name"      "Proton-GE RTSP Latest""#));
         assert!(updated.contains(r#""name"      "proton_experimental""#));
-        assert_eq!(updated.len(), CONFIG.len() + "Proton-GE RTSP Latest".len() - "GE-Proton9-25".len());
+        assert_eq!(
+            updated.len(),
+            CONFIG.len() + "Proton-GE RTSP Latest".len() - "GE-Proton9-25".len()
+        );
     }
 
     #[test]
@@ -257,11 +338,48 @@ mod tests {
         let wanted = r#"WINEDLLOVERRIDES="iyuv_32=" %command% --enable-avpro-in-proton"#;
         let updated = replace_value(LOCAL, &["apps", "438100", "LaunchOptions"], wanted)
             .expect("entry exists");
-        assert!(updated.contains(r#"WINEDLLOVERRIDES=\"iyuv_32=\" %command% --enable-avpro-in-proton"#));
+        assert!(
+            updated.contains(r#"WINEDLLOVERRIDES=\"iyuv_32=\" %command% --enable-avpro-in-proton"#)
+        );
         assert_eq!(
             find_value(&updated, &["apps", "438100", "LaunchOptions"]).as_deref(),
             Some(wanted)
         );
         assert!(updated.contains(r#""LaunchOptions"     "not this one""#));
+    }
+}
+
+#[cfg(test)]
+mod edge_tests {
+    use super::*;
+    #[test]
+    fn handles_unicode_and_empty_paths() {
+        assert_eq!(
+            find_value("\"名前\" \"Grüße 😀\"", &["名前"]),
+            Some("Grüße 😀".into())
+        );
+        assert_eq!(find_value("\"x\" \"y\"", &[]), None);
+        assert_eq!(read_string("not quoted", 0), None);
+        assert_eq!(read_string("\"unfinished\\", 0), None);
+    }
+}
+
+#[cfg(test)]
+mod insertion_tests {
+    use super::*;
+    #[test]
+    fn adds_launch_options_to_an_app_with_no_previous_options() {
+        let input = "\"apps\" { \"1\" { \"name\" \"first\" } \"438100\" { \"name\" \"VRChat\" } }";
+        let out = replace_value(
+            input,
+            &["apps", "438100", "LaunchOptions"],
+            "%command% --foo",
+        )
+        .unwrap();
+        assert_eq!(
+            find_value(&out, &["apps", "438100", "LaunchOptions"]),
+            Some("%command% --foo".into())
+        );
+        assert!(find_value(&out, &["apps", "1", "LaunchOptions"]).is_none());
     }
 }

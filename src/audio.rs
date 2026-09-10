@@ -65,14 +65,19 @@ impl Kind {
 /// Run `pactl` with a C locale so the human-readable output stays parseable.
 async fn pactl(args: &[&str]) -> Result<String> {
     let program = which("pactl").context("`pactl` not found; is pipewire-pulse installed?")?;
-    let output = tokio::process::Command::new(&program)
-        .args(args)
-        .env("LC_ALL", "C")
-        .env("LANGUAGE", "C")
-        .stdin(Stdio::null())
-        .output()
-        .await
-        .with_context(|| format!("running `pactl {}`", args.join(" ")))?;
+    let output = tokio::time::timeout(
+        std::time::Duration::from_secs(5),
+        tokio::process::Command::new(&program)
+            .args(args)
+            .env("LC_ALL", "C")
+            .env("LANGUAGE", "C")
+            .stdin(Stdio::null())
+            .kill_on_drop(true)
+            .output(),
+    )
+    .await
+    .with_context(|| format!("pactl timed out after 5s: {}", args.join(" ")))?
+    .with_context(|| format!("running `pactl {}`", args.join(" ")))?;
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
         bail!("`pactl {}` failed: {stderr}", args.join(" "));
@@ -104,13 +109,15 @@ pub fn parse_devices(listing: &str) -> Vec<AudioDevice> {
             continue;
         };
         if device.name.is_empty()
-            && let Some(rest) = trimmed.strip_prefix("Name: ") {
-                device.name = rest.trim().to_string();
-            }
+            && let Some(rest) = trimmed.strip_prefix("Name: ")
+        {
+            device.name = rest.trim().to_string();
+        }
         if device.description.is_empty()
-            && let Some(rest) = trimmed.strip_prefix("Description: ") {
-                device.description = rest.trim().to_string();
-            }
+            && let Some(rest) = trimmed.strip_prefix("Description: ")
+        {
+            device.description = rest.trim().to_string();
+        }
     }
     if let Some(device) = current
         && !device.name.is_empty()

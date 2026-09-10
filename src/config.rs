@@ -240,10 +240,6 @@ impl Default for WivrnConfig {
     }
 }
 
-
-
-
-
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct AudioConfig {
@@ -324,6 +320,10 @@ pub fn default_community_sources() -> Vec<CommunityBlocklistSource> {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct DomainBlockConfig {
+    /// Explicit prefix root (either the app directory or its pfx directory).
+    pub prefix: String,
+    /// Desired policy, persisted independently of files that Steam may reset.
+    pub blocked: Option<crate::domain_block::BlockState>,
     /// Merge community-sourced blocklists into active domain lists.
     pub load_community_blocklists: bool,
     /// Configured community blocklist sources.
@@ -333,6 +333,8 @@ pub struct DomainBlockConfig {
 impl Default for DomainBlockConfig {
     fn default() -> Self {
         Self {
+            prefix: String::new(),
+            blocked: None,
             load_community_blocklists: true,
             community_sources: default_community_sources(),
         }
@@ -391,15 +393,8 @@ impl Config {
     }
 
     pub fn save(&self, path: &Path) -> Result<()> {
-        if let Some(parent) = path.parent() {
-            std::fs::create_dir_all(parent)
-                .with_context(|| format!("creating {}", parent.display()))?;
-        }
         let text = toml::to_string_pretty(self).context("serializing config")?;
-        let tmp = path.with_extension("toml.tmp");
-        std::fs::write(&tmp, text).with_context(|| format!("writing {}", tmp.display()))?;
-        std::fs::rename(&tmp, path).with_context(|| format!("replacing {}", path.display()))?;
-        Ok(())
+        crate::files::atomic_write(path, text.as_bytes())
     }
 
     /// Fix up anything that would make the app misbehave: blank ids, duplicate
@@ -427,7 +422,14 @@ impl Config {
             self.autostart[index].id = candidate;
         }
 
+        if !self.general.ui_scale.is_finite() {
+            self.general.ui_scale = General::default().ui_scale;
+        }
         self.general.ui_scale = self.general.ui_scale.clamp(0.6, 4.0);
+        for entry in &mut self.autostart {
+            entry.start_delay_secs = entry.start_delay_secs.min(86_400);
+            entry.grace_secs = entry.grace_secs.clamp(-1, 86_400);
+        }
         self.general.poll_interval_ms = self.general.poll_interval_ms.clamp(200, 60_000);
         self.general.log_capacity = self.general.log_capacity.clamp(50, 100_000);
         self.general.relaunch_debounce_secs = self.general.relaunch_debounce_secs.clamp(1, 3600);
@@ -504,8 +506,11 @@ fn default_entries() -> Vec<AutostartEntry> {
             name: "VRCVideoCacher".into(),
             enabled: true,
             trigger: Trigger::Vrchat,
-            command: "/run/media/system/Data/Games/Steam/steamapps/common/VRCVideoCacher/VRCVideoCacher".into(),
-            working_dir: "/run/media/system/Data/Games/Steam/steamapps/common/VRCVideoCacher".into(),
+            command:
+                "/run/media/system/Data/Games/Steam/steamapps/common/VRCVideoCacher/VRCVideoCacher"
+                    .into(),
+            working_dir: "/run/media/system/Data/Games/Steam/steamapps/common/VRCVideoCacher"
+                .into(),
             console: true,
             match_patterns: vec!["vrcvideocacher".into()],
             grace_secs: 120,
@@ -568,7 +573,8 @@ fn default_entries() -> Vec<AutostartEntry> {
             enabled: true,
             trigger: Trigger::Vrchat,
             command: home_str(".local/bin/vrcbioupdater"),
-            working_dir: "/run/media/system/Data/OneDrive/Games/VRChat/_TOOLS/VRChatBioUpdater".into(),
+            working_dir: "/run/media/system/Data/OneDrive/Games/VRChat/_TOOLS/VRChatBioUpdater"
+                .into(),
             console: true,
             match_patterns: vec!["vrcbioupdater".into(), "vrchatbioupdater".into()],
             grace_secs: 120,
@@ -594,8 +600,6 @@ fn default_entries() -> Vec<AutostartEntry> {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-
 
     #[test]
     fn slugify_makes_stable_ids() {
@@ -716,5 +720,21 @@ mod tests {
         let config = Config::default();
         assert_eq!(config.unique_id("VRCX"), "vrcx-2");
         assert_eq!(config.unique_id("Brand New"), "brand-new");
+    }
+}
+
+#[cfg(test)]
+mod range_tests {
+    use super::*;
+    #[test]
+    fn non_finite_scale_and_extreme_timers_are_normalized() {
+        let mut config = Config::default();
+        config.general.ui_scale = f32::NAN;
+        config.autostart[0].start_delay_secs = u64::MAX;
+        config.autostart[0].grace_secs = i64::MAX;
+        config.normalize();
+        assert!(config.general.ui_scale.is_finite());
+        assert_eq!(config.autostart[0].start_delay_secs, 86_400);
+        assert_eq!(config.autostart[0].grace_secs, 86_400);
     }
 }

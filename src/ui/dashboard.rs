@@ -1,8 +1,10 @@
 use egui::{RichText, Ui};
 
 use crate::state::{Command, EntryStatus};
-use crate::ui::widgets::{self, BIG_BUTTON_HEIGHT, BLUE, GREEN, GREY, ORANGE, RED, ROW_BUTTON_HEIGHT};
 use crate::ui::LvrApp;
+use crate::ui::widgets::{
+    self, BIG_BUTTON_HEIGHT, BLUE, GREEN, GREY, ORANGE, RED, ROW_BUTTON_HEIGHT,
+};
 
 /// Formats the detail line for an entry, used by both the dashboard hover/status
 /// and the autostart list.
@@ -103,6 +105,16 @@ fn render_telemetry_hud(app: &LvrApp, ui: &mut Ui) {
         let apps_color = if running_apps > 0 { GREEN } else { GREY };
         widgets::pill(ui, "Managed Apps", &apps_text, apps_color);
 
+        // Domains Shield: Conditional pill showing blocked/total domains
+        let domain_lists = crate::domain_block::active_domains();
+        let total_domains = domain_lists.total_count();
+        let blocked_domains = domain_lists.blocked_count(&app.status.block_state);
+        if blocked_domains > 0 {
+            let domains_text = format!("{blocked_domains}/{total_domains}");
+            widgets::pill(ui, "Domains", &domains_text, RED)
+                .on_hover_text(format!("{blocked_domains} of {total_domains} domains blocked across active shield categories"));
+        }
+
         // XR Session (appears when WiVRn is running): Active or Idle
         if app.status.wivrn_running {
             let (sess_text, sess_color) = if app.status.session_running {
@@ -137,7 +149,9 @@ fn render_domain_shields(app: &mut LvrApp, ui: &mut Ui) {
     let full = ui.available_width();
     let spacing = ui.spacing().item_spacing.x;
     let count = categories.len().max(1) as f32;
-    let button_w = ((full - spacing * (count - 1.0)) / count).floor().max(110.0);
+    let button_w = ((full - spacing * (count - 1.0)) / count)
+        .floor()
+        .max(110.0);
 
     ui.horizontal_wrapped(|ui| {
         for category in categories {
@@ -151,12 +165,24 @@ fn render_domain_shields(app: &mut LvrApp, ui: &mut Ui) {
                 .stroke((1.5, tint));
 
             let tooltip = if is_blocked {
-                format!("{} is currently BLOCKED ({} domains). Click to ALLOW.", category.label(), domain_count)
+                format!(
+                    "{} is currently BLOCKED ({} domains). Click to ALLOW.",
+                    category.label(),
+                    domain_count
+                )
             } else {
-                format!("{} is currently ALLOWED. Click to BLOCK ({} domains).", category.label(), domain_count)
+                format!(
+                    "{} is currently ALLOWED. Click to BLOCK ({} domains).",
+                    category.label(),
+                    domain_count
+                )
             };
 
-            if ui.add_sized(egui::Vec2::new(button_w, BIG_BUTTON_HEIGHT), button).on_hover_text(tooltip).clicked() {
+            if ui
+                .add_sized(egui::Vec2::new(button_w, BIG_BUTTON_HEIGHT), button)
+                .on_hover_text(tooltip)
+                .clicked()
+            {
                 // Optimistically update local UI state immediately
                 app.status.block_state.set_blocked(&category, !is_blocked);
                 app.send(Command::ToggleBlockCategory(category));
@@ -236,7 +262,11 @@ fn render_quick_actions(app: &mut LvrApp, ui: &mut Ui) {
 /// Section 5: Managed Companion Applications
 fn render_managed_apps(app: &mut LvrApp, ui: &mut Ui) {
     if app.status.entries.is_empty() {
-        ui.label(RichText::new("No companion applications configured.").color(GREY).size(14.0));
+        ui.label(
+            RichText::new("No companion applications configured.")
+                .color(GREY)
+                .size(14.0),
+        );
         return;
     }
 
@@ -261,16 +291,15 @@ fn render_managed_apps(app: &mut LvrApp, ui: &mut Ui) {
                 .corner_radius(egui::CornerRadius::same(8));
 
             if is_running {
-                button = button
-                    .fill(GREEN.gamma_multiply(0.18))
-                    .stroke((1.2, GREEN));
+                button = button.fill(GREEN.gamma_multiply(0.18)).stroke((1.2, GREEN));
             } else {
                 button = button
                     .fill(status_color.gamma_multiply(0.08))
                     .stroke((1.0, GREY.gamma_multiply(0.5)));
             }
 
-            let resp = ui.add_sized(egui::Vec2::new(card_w, ROW_BUTTON_HEIGHT), button)
+            let resp = ui
+                .add_sized(egui::Vec2::new(card_w, ROW_BUTTON_HEIGHT), button)
                 .on_hover_text(hover_text);
 
             if resp.clicked() {

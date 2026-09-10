@@ -67,19 +67,25 @@ pub fn pill_sized(ui: &mut Ui, label: &str, value: &str, color: Color32, width: 
         .inner_margin(egui::Margin::symmetric(10, 6));
 
     if width > 0.0 {
-        frame.show(ui, |ui| {
-            ui.set_width(width);
-            ui.vertical(|ui| {
-                ui.label(RichText::new(label).size(11.0).color(GREY));
-                ui.label(RichText::new(value).size(15.0).strong().color(color));
-            });
-        }).response
+        frame
+            .show(ui, |ui| {
+                ui.set_width(width);
+                ui.vertical(|ui| {
+                    ui.label(RichText::new(label).size(11.0).color(GREY));
+                    ui.label(RichText::new(value).size(15.0).strong().color(color));
+                });
+            })
+            .response
     } else {
         let galley_font_label = egui::FontId::new(11.0, egui::FontFamily::Proportional);
         let galley_font_val = egui::FontId::new(15.0, egui::FontFamily::Proportional);
 
-        let label_galley = ui.painter().layout_no_wrap(label.to_string(), galley_font_label, GREY);
-        let value_galley = ui.painter().layout_no_wrap(value.to_string(), galley_font_val, color);
+        let label_galley = ui
+            .painter()
+            .layout_no_wrap(label.to_string(), galley_font_label, GREY);
+        let value_galley = ui
+            .painter()
+            .layout_no_wrap(value.to_string(), galley_font_val, color);
 
         let pad_x = 10.0;
         let pad_y = 6.0;
@@ -89,7 +95,8 @@ pub fn pill_sized(ui: &mut Ui, label: &str, value: &str, color: Color32, width: 
         let pill_w = content_w + pad_x * 2.0;
         let pill_h = label_galley.size().y + item_gap + value_galley.size().y + pad_y * 2.0;
 
-        let (rect, response) = ui.allocate_exact_size(egui::vec2(pill_w, pill_h), egui::Sense::click());
+        let (rect, response) =
+            ui.allocate_exact_size(egui::vec2(pill_w, pill_h), egui::Sense::click());
 
         if ui.is_rect_visible(rect) {
             let painter = ui.painter();
@@ -106,12 +113,13 @@ pub fn pill_sized(ui: &mut Ui, label: &str, value: &str, color: Color32, width: 
                 egui::StrokeKind::Inside,
             );
 
+            let label_height = label_galley.size().y;
             let label_pos = egui::pos2(rect.min.x + pad_x, rect.min.y + pad_y);
             painter.galley(label_pos, label_galley, GREY);
 
             let val_pos = egui::pos2(
                 rect.min.x + pad_x,
-                rect.min.y + pad_y + painter.layout_no_wrap(label.to_string(), egui::FontId::new(11.0, egui::FontFamily::Proportional), GREY).size().y + item_gap,
+                rect.min.y + pad_y + label_height + item_gap,
             );
             painter.galley(val_pos, value_galley, color);
         }

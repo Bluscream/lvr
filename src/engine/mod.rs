@@ -54,6 +54,12 @@ pub struct Engine {
 
 impl Engine {
     pub fn new(shared: Shared, rx: UnboundedReceiver<Command>) -> Self {
+        let domain_config = shared.config().domain_block.clone();
+        let block_state = domain_config.blocked.unwrap_or_else(|| {
+            crate::domain_block::detect_vrc_prefix(&domain_config.prefix)
+                .map(|p| crate::domain_block::read_block_state(&p))
+                .unwrap_or_default()
+        });
         Self {
             shared,
             rx,
@@ -69,9 +75,7 @@ impl Engine {
             cached_sources: Vec::new(),
             cached_default_sink: String::new(),
             cached_default_source: String::new(),
-            block_state: crate::domain_block::detect_vrc_prefix("")
-                .map(|p| crate::domain_block::read_block_state(&p))
-                .unwrap_or_default(),
+            block_state,
             last_media_block_poll: None,
             virtual_display_created: false,
             virtual_display_info: None,
@@ -82,13 +86,21 @@ impl Engine {
 
     pub async fn run(mut self) {
         self.shared.info("Supervisor started");
+        crate::systemd::notify("READY=1");
+        if self.shared.config().domain_block.blocked.is_none() {
+            self.shared.config().domain_block.blocked = Some(self.block_state.clone());
+            if let Err(err) = self.shared.save_config() {
+                self.shared
+                    .error(format!("Persisting initial domain policy failed: {err:#}"));
+            }
+        }
         let domain_cfg = self.shared.config().domain_block.clone();
         tokio::spawn(async move {
             crate::domain_block::init_from_remote_or_fallback_with_config(&domain_cfg).await;
         });
         if self.shared.config().virtual_display.create_on_startup {
             let physical_count = display::get_connected_display_count();
-            if physical_count == 0 {
+            if physical_count == Some(0) {
                 let res = self.shared.config().virtual_display.resolution.clone();
                 if let Some(info) = display::create_virtual_display(&res) {
                     self.virtual_display_created = true;
@@ -96,10 +108,10 @@ impl Engine {
                     self.shared.info(format!("Created virtual display {info} on app startup (no physical display connected)"));
                 }
             } else {
-                self.shared.debug(format!("Skipping virtual display creation on startup: {physical_count} physical display(s) connected"));
+                self.shared.debug(format!("Skipping virtual display creation on startup: {physical_count:?} physical display(s) connected"));
             }
         }
-        self.last_display_count = Some(display::get_connected_display_count());
+        self.last_display_count = display::get_connected_display_count();
 
         let initial_poll = self.shared.config().general.poll_interval_ms;
         let mut interval = tokio::time::interval(Duration::from_millis(initial_poll));
@@ -107,6 +119,7 @@ impl Engine {
         let mut current_interval_ms = initial_poll;
 
         loop {
+            crate::systemd::notify("WATCHDOG=1");
             tokio::select! {
                 _ = interval.tick() => {
                     self.tick().await;
@@ -128,6 +141,7 @@ impl Engine {
     }
 
     async fn shutdown(&mut self) {
+        crate::systemd::notify("STOPPING=1");
         if self.virtual_display_created {
             display::remove_virtual_display();
             self.shared.info("Cleaned up virtual display on app exit");
@@ -170,8 +184,12 @@ impl Engine {
             Command::ReloadDomainLists => {
                 let domain_cfg = self.shared.config().domain_block.clone();
                 let lists = crate::domain_block::reload_domain_lists_with_config(&domain_cfg).await;
-                if let Some(prefix) = crate::domain_block::detect_vrc_prefix("") {
-                    let _ = crate::domain_block::sync_all(&prefix, &self.block_state);
+                if let Some(prefix) = crate::domain_block::detect_vrc_prefix(
+                    &self.shared.config().domain_block.prefix.clone(),
+                ) && let Err(err) = crate::domain_block::sync_all(&prefix, &self.block_state)
+                {
+                    self.shared
+                        .error(format!("Applying reloaded domains failed: {err:#}"));
                 }
                 self.shared.info(format!(
                     "Updated active domain lists: {} videos, {} images, {} strings, {} shared (total: {})",
@@ -188,9 +206,8 @@ impl Engine {
                 self.last_audio_poll = None;
                 self.last_media_block_poll = None;
 
-                // Re-read prefix block state immediately
-                if let Some(prefix) = crate::domain_block::detect_vrc_prefix("") {
-                    self.block_state = crate::domain_block::read_block_state(&prefix);
+                if let Some(state) = self.shared.config().domain_block.blocked.clone() {
+                    self.block_state = state;
                 }
 
                 // Reload domains
@@ -213,13 +230,16 @@ impl Engine {
                 match crate::domain_block::dns_shield::set_steam_shield_enabled(enable).await {
                     Ok(()) => {
                         if enable {
-                            self.shared.info("DNS Shield enabled in Steam launch options for VRChat");
+                            self.shared
+                                .info("DNS Shield enabled in Steam launch options for VRChat");
                         } else {
-                            self.shared.info("DNS Shield disabled in Steam launch options for VRChat");
+                            self.shared
+                                .info("DNS Shield disabled in Steam launch options for VRChat");
                         }
                     }
                     Err(err) => {
-                        self.shared.error(format!("Failed modifying Steam launch options: {err:#}"));
+                        self.shared
+                            .error(format!("Failed modifying Steam launch options: {err:#}"));
                     }
                 }
                 self.tick().await;
@@ -270,8 +290,10 @@ impl Engine {
 
         self.update_virtual_display(&config);
 
-        let steam_launch_options = crate::domain_block::dns_shield::read_steam_launch_options().unwrap_or_default();
-        let steam_shield_active = crate::domain_block::dns_shield::is_shield_in_launch_options(&steam_launch_options);
+        let steam_launch_options =
+            crate::domain_block::dns_shield::read_steam_launch_options().unwrap_or_default();
+        let steam_shield_active =
+            crate::domain_block::dns_shield::is_shield_in_launch_options(&steam_launch_options);
 
         let status = Status {
             wivrn_running: wivrn.running,
@@ -297,20 +319,28 @@ impl Engine {
     }
 
     fn update_virtual_display(&mut self, config: &Config) {
-        let current_displays = display::get_connected_display_count();
+        let Some(current_displays) = display::get_connected_display_count() else {
+            return;
+        };
         let now = Instant::now();
         let debounce_dur = Duration::from_secs(config.virtual_display.debounce_secs);
 
         if let Some(last_count) = self.last_display_count {
-            if last_count > 0 && current_displays == 0 && config.virtual_display.create_on_last_display_unplugged {
+            if last_count > 0
+                && current_displays == 0
+                && config.virtual_display.create_on_last_display_unplugged
+            {
                 if debounce_dur.is_zero() {
                     self.pending_virtual_display_action = None;
-                    self.shared.warn("Last physical display unplugged, creating virtual display...");
+                    self.shared
+                        .warn("Last physical display unplugged, creating virtual display...");
                     let res = config.virtual_display.resolution.clone();
                     if let Some(info) = display::create_virtual_display(&res) {
                         self.virtual_display_created = true;
                         self.virtual_display_info = Some(info.clone());
-                        self.shared.info(format!("Virtual display {info} created on display disconnect"));
+                        self.shared.info(format!(
+                            "Virtual display {info} created on display disconnect"
+                        ));
                     }
                 } else {
                     self.shared.warn(format!(
@@ -319,11 +349,16 @@ impl Engine {
                     ));
                     self.pending_virtual_display_action = Some((true, now + debounce_dur));
                 }
-            } else if last_count == 0 && current_displays > 0 && (self.virtual_display_created || matches!(self.pending_virtual_display_action, Some((true, _)))) {
+            } else if last_count == 0
+                && current_displays > 0
+                && (self.virtual_display_created
+                    || matches!(self.pending_virtual_display_action, Some((true, _))))
+            {
                 if debounce_dur.is_zero() {
                     self.pending_virtual_display_action = None;
                     if self.virtual_display_created {
-                        self.shared.info("Physical display re-connected, removing virtual display...");
+                        self.shared
+                            .info("Physical display re-connected, removing virtual display...");
                         if display::remove_virtual_display() {
                             self.virtual_display_created = false;
                             self.virtual_display_info = None;
@@ -348,13 +383,18 @@ impl Engine {
                     self.pending_virtual_display_action = None;
                 } else if now >= due_time {
                     self.pending_virtual_display_action = None;
-                    if !self.virtual_display_created && config.virtual_display.create_on_last_display_unplugged {
-                        self.shared.warn("Debounce elapsed; creating virtual display...");
+                    if !self.virtual_display_created
+                        && config.virtual_display.create_on_last_display_unplugged
+                    {
+                        self.shared
+                            .warn("Debounce elapsed; creating virtual display...");
                         let res = config.virtual_display.resolution.clone();
                         if let Some(info) = display::create_virtual_display(&res) {
                             self.virtual_display_created = true;
                             self.virtual_display_info = Some(info.clone());
-                            self.shared.info(format!("Virtual display {info} created on display disconnect"));
+                            self.shared.info(format!(
+                                "Virtual display {info} created on display disconnect"
+                            ));
                         }
                     }
                 }
@@ -364,7 +404,8 @@ impl Engine {
             } else if now >= due_time {
                 self.pending_virtual_display_action = None;
                 if self.virtual_display_created {
-                    self.shared.info("Debounce elapsed; removing virtual display...");
+                    self.shared
+                        .info("Debounce elapsed; removing virtual display...");
                     if display::remove_virtual_display() {
                         self.virtual_display_created = false;
                         self.virtual_display_info = None;
@@ -405,38 +446,45 @@ impl Engine {
         }
         self.last_media_block_poll = Some(Instant::now());
 
-        if let Some(prefix) = crate::domain_block::detect_vrc_prefix("") {
-            self.block_state = crate::domain_block::read_block_state(&prefix);
+        let prefix_setting = self.shared.config().domain_block.prefix.clone();
+        if let Some(prefix) = crate::domain_block::detect_vrc_prefix(&prefix_setting)
+            && let Err(err) = crate::domain_block::sync_all(&prefix, &self.block_state)
+        {
+            self.shared
+                .error(format!("Refreshing domain/media policy failed: {err:#}"));
         }
     }
 
-    async fn set_block_category(&mut self, category: crate::domain_block::BlockCategory, block: bool) {
-        self.block_state.set_blocked(&category, block);
-        if let Some(prefix) = crate::domain_block::detect_vrc_prefix("") {
-            match crate::domain_block::sync_all(&prefix, &self.block_state) {
-                Ok(()) => {
-                    let label = category.label();
-                    if block {
-                        self.shared.warn(format!("VRChat {label} BLOCKED"));
-                    } else {
-                        self.shared.info(format!("VRChat {label} ALLOWED (unblocked)"));
-                    }
-                }
-                Err(err) => {
-                    self.shared.error(format!("Failed to sync {category:?} blocking state: {err:#}"));
-                    // Roll back in-memory state
-                    self.block_state.set_blocked(&category, !block);
-                }
-            }
-        } else {
-            let label = category.label();
-            if block {
-                self.shared.warn(format!("VRChat {label} BLOCKED (no prefix found, shield-only)"));
-            } else {
-                self.shared.info(format!("VRChat {label} ALLOWED (no prefix found, shield-only)"));
-            }
-            // Still sync dns_shield even without a prefix
-            let _ = crate::domain_block::dns_shield::sync_shield_rules(&self.block_state);
+    async fn set_block_category(
+        &mut self,
+        category: crate::domain_block::BlockCategory,
+        block: bool,
+    ) {
+        let prefix_setting = self.shared.config().domain_block.prefix.clone();
+        let Some(prefix) = crate::domain_block::detect_vrc_prefix(&prefix_setting) else {
+            self.shared.error("Cannot change domain blocking: VRChat prefix not found. Set the prefix in Settings.");
+            return;
+        };
+        let mut desired = self.block_state.clone();
+        desired.set_blocked(&category, block);
+        // Save desired state first so a partial filesystem error remains retryable.
+        self.shared.config().domain_block.blocked = Some(desired.clone());
+        if let Err(err) = self.shared.save_config() {
+            self.shared.config().domain_block.blocked = Some(self.block_state.clone());
+            self.shared
+                .error(format!("Saving domain policy failed: {err:#}"));
+            return;
+        }
+        self.block_state = desired;
+        match crate::domain_block::sync_all(&prefix, &self.block_state) {
+            Ok(()) => self.shared.info(format!(
+                "{} {}",
+                category.label(),
+                if block { "blocked" } else { "unblocked" }
+            )),
+            Err(err) => self.shared.error(format!(
+                "Policy saved but could not be fully applied; will retry: {err:#}"
+            )),
         }
     }
 }
@@ -509,8 +557,10 @@ pub async fn probe(config: &Config) -> Status {
     let audio_on_vr =
         !config.audio.vr_sink.trim().is_empty() && default_sink == config.audio.vr_sink.trim();
 
-    let steam_launch_options = crate::domain_block::dns_shield::read_steam_launch_options().unwrap_or_default();
-    let steam_shield_active = crate::domain_block::dns_shield::is_shield_in_launch_options(&steam_launch_options);
+    let steam_launch_options =
+        crate::domain_block::dns_shield::read_steam_launch_options().unwrap_or_default();
+    let steam_shield_active =
+        crate::domain_block::dns_shield::is_shield_in_launch_options(&steam_launch_options);
 
     Status {
         wivrn_running: wivrn.running,
@@ -524,7 +574,7 @@ pub async fn probe(config: &Config) -> Status {
         default_source,
         audio_on_vr,
         entries,
-        block_state: crate::domain_block::detect_vrc_prefix("")
+        block_state: crate::domain_block::detect_vrc_prefix(&config.domain_block.prefix)
             .map(|p| crate::domain_block::read_block_state(&p))
             .unwrap_or_default(),
         sinks: audio::list_devices(Kind::Sink).await.unwrap_or_default(),

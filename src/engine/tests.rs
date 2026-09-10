@@ -345,16 +345,25 @@ fn manual_start_long_after_vrchat_closed_is_left_alone() {
     runtime.plan(&entry, input(true, true, t0));
     runtime.plan(&entry, input(false, true, t0));
     let after_grace = t0 + Duration::from_secs(121);
-    assert_eq!(runtime.plan(&entry, input(false, true, after_grace)), Action::Stop);
+    assert_eq!(
+        runtime.plan(&entry, input(false, true, after_grace)),
+        Action::Stop
+    );
 
     runtime.plan(&entry, input(false, false, after_grace));
 
     let much_later = after_grace + Duration::from_secs(10_000);
-    assert_eq!(runtime.plan(&entry, input(false, true, much_later)), Action::None);
+    assert_eq!(
+        runtime.plan(&entry, input(false, true, much_later)),
+        Action::None
+    );
     assert_eq!(runtime.stop_at, None);
 
     let later_still = much_later + Duration::from_secs(600);
-    assert_eq!(runtime.plan(&entry, input(false, true, later_still)), Action::None);
+    assert_eq!(
+        runtime.plan(&entry, input(false, true, later_still)),
+        Action::None
+    );
 }
 
 #[test]
@@ -366,7 +375,10 @@ fn a_new_vrchat_session_rearms_the_grace_period() {
     runtime.plan(&entry, input(true, true, t0));
     runtime.plan(&entry, input(false, true, t0));
     let after_grace = t0 + Duration::from_secs(121);
-    assert_eq!(runtime.plan(&entry, input(false, true, after_grace)), Action::Stop);
+    assert_eq!(
+        runtime.plan(&entry, input(false, true, after_grace)),
+        Action::Stop
+    );
     runtime.plan(&entry, input(false, false, after_grace));
 
     let t1 = after_grace + Duration::from_secs(3_600);
@@ -413,4 +425,19 @@ fn a_zero_grace_stop_also_disarms() {
         runtime.plan(&entry, input(false, true, t0 + Duration::from_secs(60))),
         Action::None
     );
+}
+
+#[test]
+fn disabled_entry_cancels_pending_start_and_stop() {
+    let mut runtime = EntryRuntime::default();
+    let now = Instant::now();
+    runtime.start_at = Some(now);
+    runtime.stop_at = Some(now);
+    let mut configured = entry();
+    configured.enabled = false;
+    assert_eq!(
+        runtime.plan(&configured, input(true, false, now)),
+        Action::None
+    );
+    assert!(runtime.start_at.is_none() && runtime.stop_at.is_none());
 }

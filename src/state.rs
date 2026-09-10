@@ -141,19 +141,26 @@ pub fn friendly_label(name: &str, devices: &[AudioDevice]) -> String {
 
 fn clean_node_name(name: &str) -> String {
     let mut cleaned = name;
-    for prefix in &["alsa_output.", "alsa_input.", "bluez_output.", "bluez_input."] {
+    for prefix in &[
+        "alsa_output.",
+        "alsa_input.",
+        "bluez_output.",
+        "bluez_input.",
+    ] {
         if let Some(rest) = cleaned.strip_prefix(prefix) {
             cleaned = rest;
             break;
         }
     }
     if let Some(pos) = cleaned.rfind('.')
-        && pos > 0 && pos < cleaned.len() - 1 {
-            let suffix = &cleaned[pos + 1..];
-            if suffix.contains("stereo") || suffix.contains("mono") || suffix.contains("multichannel") {
-                cleaned = &cleaned[..pos];
-            }
+        && pos > 0
+        && pos < cleaned.len() - 1
+    {
+        let suffix = &cleaned[pos + 1..];
+        if suffix.contains("stereo") || suffix.contains("mono") || suffix.contains("multichannel") {
+            cleaned = &cleaned[..pos];
         }
+    }
     if let Some(rest) = cleaned.strip_prefix("usb-") {
         cleaned = rest;
     } else if let Some(rest) = cleaned.strip_prefix("pci-") {
@@ -234,6 +241,9 @@ struct Inner {
     requested_tab: Mutex<Option<String>>,
     /// Set when the app should exit for real rather than hide to tray.
     quitting: AtomicBool,
+    supervisor_failed: AtomicBool,
+    tray_available: AtomicBool,
+    save_lock: Mutex<()>,
     /// egui repaint handle, installed once the GUI is up.
     repaint: Mutex<Option<egui::Context>>,
 }
@@ -253,6 +263,9 @@ impl Shared {
                 show_window: AtomicBool::new(false),
                 requested_tab: Mutex::new(None),
                 quitting: AtomicBool::new(false),
+                supervisor_failed: AtomicBool::new(false),
+                tray_available: AtomicBool::new(true),
+                save_lock: Mutex::new(()),
                 repaint: Mutex::new(None),
             }),
         };
@@ -287,7 +300,10 @@ impl Shared {
     pub fn send(&self, command: Command) {
         // The receiver only goes away during shutdown, where dropped commands
         // are exactly what we want.
-        let _ = self.inner.commands.send(command);
+        if self.inner.commands.send(command).is_err() && !self.is_quitting() {
+            self.error("Supervisor command channel closed unexpectedly");
+            self.mark_supervisor_failed();
+        }
     }
 
     pub fn log(&self, level: LogLevel, message: impl Into<String>) {
@@ -344,6 +360,7 @@ impl Shared {
     }
 
     pub fn save_config(&self) -> anyhow::Result<()> {
+        let _save = lock(&self.inner.save_lock);
         let config = self.config_snapshot();
         config.save(&self.inner.config_path)
     }
@@ -382,6 +399,28 @@ impl Shared {
         self.request_repaint();
     }
 
+    pub fn tray_available(&self) -> bool {
+        self.inner.tray_available.load(Ordering::Relaxed)
+    }
+
+    pub fn set_tray_available(&self, available: bool) {
+        self.inner
+            .tray_available
+            .store(available, Ordering::Relaxed);
+        if !available {
+            self.request_show_window();
+        }
+    }
+
+    pub fn supervisor_failed(&self) -> bool {
+        self.inner.supervisor_failed.load(Ordering::SeqCst)
+    }
+
+    pub fn mark_supervisor_failed(&self) {
+        self.inner.supervisor_failed.store(true, Ordering::SeqCst);
+        self.set_quitting();
+    }
+
     pub fn is_quitting(&self) -> bool {
         self.inner.quitting.load(Ordering::SeqCst)
     }
@@ -413,7 +452,10 @@ mod tests {
         assert_eq!(friendly_label("wivrn.source", &[]), "WiVRn Source");
         assert_eq!(friendly_label("", &[]), "unknown");
         assert_eq!(
-            friendly_label("alsa_output.usb-SmartlinkTechnology_WG2_20201111000001-00.analog-stereo", &[]),
+            friendly_label(
+                "alsa_output.usb-SmartlinkTechnology_WG2_20201111000001-00.analog-stereo",
+                &[]
+            ),
             "SmartlinkTechnology WG2"
         );
     }

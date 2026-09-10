@@ -15,29 +15,47 @@ pub(super) struct AudioRouting {
     pub(super) on_vr: bool,
     pub(super) saved_sink: Option<String>,
     pub(super) saved_source: Option<String>,
-    pub(super) initialized: bool,
+    last_headset: Option<bool>,
+    pending: Option<bool>,
+    last_attempt: Option<Instant>,
+}
+
+impl AudioRouting {
+    fn auto_target(&mut self, enabled: bool, connected: bool, now: Instant) -> Option<bool> {
+        if !enabled {
+            self.last_headset = None;
+            self.pending = None;
+            return None;
+        }
+        if self.last_headset != Some(connected) {
+            if self.last_headset.is_some() || connected {
+                self.pending = Some(connected);
+            }
+            self.last_headset = Some(connected);
+            self.last_attempt = None;
+        }
+        let target = self.pending?;
+        if self
+            .last_attempt
+            .is_some_and(|last| now.duration_since(last) < AUDIO_POLL_INTERVAL)
+        {
+            return None;
+        }
+        self.last_attempt = Some(now);
+        Some(target)
+    }
 }
 
 impl Engine {
     pub(super) async fn apply_audio(&mut self, config: &Config, wivrn: &WivrnState) {
-        if !config.audio.enabled {
-            self.audio.initialized = true;
-            return;
-        }
-
-        if !self.audio.initialized {
-            self.audio.initialized = true;
-            self.audio.on_vr = wivrn.headset_connected;
-            if wivrn.headset_connected {
-                self.route_audio_to_vr(false).await;
-            }
-            return;
-        }
-
-        if wivrn.headset_connected && !self.audio.on_vr {
-            self.route_audio_to_vr(false).await;
-        } else if !wivrn.headset_connected && self.audio.on_vr {
-            self.route_audio_to_desktop(false).await;
+        match self.audio.auto_target(
+            config.audio.enabled,
+            wivrn.headset_connected,
+            Instant::now(),
+        ) {
+            Some(true) => self.route_audio_to_vr(false).await,
+            Some(false) => self.route_audio_to_desktop(false).await,
+            None => {}
         }
     }
 
@@ -105,6 +123,11 @@ impl Engine {
         manual: bool,
         nothing_happened: &str,
     ) {
+        self.audio.pending = if manual || outcome.errors.is_empty() {
+            None
+        } else {
+            Some(to_vr)
+        };
         for error in &outcome.errors {
             self.shared.warn(error.clone());
         }
@@ -160,5 +183,48 @@ impl Engine {
                 self.cached_sources = sources;
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn manual_routing_is_preserved_until_headset_transition() {
+        let now = Instant::now();
+        let mut routing = AudioRouting::default();
+        assert_eq!(routing.auto_target(true, true, now), Some(true));
+        routing.pending = None;
+        routing.on_vr = false;
+        assert_eq!(
+            routing.auto_target(true, true, now + Duration::from_secs(3)),
+            None
+        );
+        assert_eq!(
+            routing.auto_target(true, false, now + Duration::from_secs(4)),
+            Some(false)
+        );
+    }
+    #[test]
+    fn retries_failed_partial_routes_without_poll_spam() {
+        let now = Instant::now();
+        let mut routing = AudioRouting::default();
+        assert_eq!(routing.auto_target(true, true, now), Some(true));
+        assert_eq!(
+            routing.auto_target(true, true, now + Duration::from_millis(200)),
+            None
+        );
+        assert_eq!(
+            routing.auto_target(true, true, now + Duration::from_secs(2)),
+            Some(true)
+        );
+        assert_eq!(
+            routing.auto_target(false, true, now + Duration::from_secs(3)),
+            None
+        );
+        assert_eq!(
+            routing.auto_target(true, true, now + Duration::from_secs(4)),
+            Some(true)
+        );
     }
 }

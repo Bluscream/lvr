@@ -198,7 +198,7 @@ impl LvrApp {
             config.normalize();
         }
         let normalized = self.shared.config_snapshot();
-        match normalized.save(self.shared.config_path()) {
+        match self.shared.save_config() {
             Ok(()) => {
                 self.saved_config = normalized;
                 self.shared.send(Command::Poke);
@@ -237,7 +237,10 @@ impl LvrApp {
                 let button = egui::Button::new(text)
                     .corner_radius(egui::CornerRadius::same(8))
                     .selected(selected);
-                if ui.add_sized(egui::Vec2::new(tab_btn_w, 38.0), button).clicked() {
+                if ui
+                    .add_sized(egui::Vec2::new(tab_btn_w, 38.0), button)
+                    .clicked()
+                {
                     self.tab = tab;
                 }
             }
@@ -251,11 +254,16 @@ impl LvrApp {
                     } else {
                         (widgets::GREY, "WIVRN OFFLINE")
                     };
-                    let btn = egui::Button::new(RichText::new(text).size(13.0).strong().color(color))
-                        .corner_radius(egui::CornerRadius::same(6))
-                        .fill(color.gamma_multiply(0.12))
-                        .stroke((1.0, color.gamma_multiply(0.4)));
-                    if ui.add(btn).on_hover_text("Click to refresh status, domain lists, and prefix state").clicked() {
+                    let btn =
+                        egui::Button::new(RichText::new(text).size(13.0).strong().color(color))
+                            .corner_radius(egui::CornerRadius::same(6))
+                            .fill(color.gamma_multiply(0.12))
+                            .stroke((1.0, color.gamma_multiply(0.4)));
+                    if ui
+                        .add(btn)
+                        .on_hover_text("Click to refresh status, domain lists, and prefix state")
+                        .clicked()
+                    {
                         self.shared.send(Command::ReloadAll);
                     }
                 });
@@ -286,24 +294,26 @@ impl LvrApp {
         let mut cancel = false;
 
         ctx.show_viewport_immediate(viewport_id, builder, |ctx, class| {
-            let render_content = |ui: &mut egui::Ui, editor: &mut EntryEditor, close_and_save: &mut bool, cancel: &mut bool| {
-                egui::Panel::bottom("editor_footer")
-                    .show(ui, |ui| {
-                        ui.add_space(6.0);
-                        if let Some(error) = &editor.error {
-                            ui.label(RichText::new(error).color(widgets::RED).size(14.0));
-                            ui.add_space(4.0);
+            let render_content = |ui: &mut egui::Ui,
+                                  editor: &mut EntryEditor,
+                                  close_and_save: &mut bool,
+                                  cancel: &mut bool| {
+                egui::Panel::bottom("editor_footer").show(ui, |ui| {
+                    ui.add_space(6.0);
+                    if let Some(error) = &editor.error {
+                        ui.label(RichText::new(error).color(widgets::RED).size(14.0));
+                        ui.add_space(4.0);
+                    }
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        if widgets::row_button(ui, "Cancel", None, 90.0).clicked() {
+                            *cancel = true;
                         }
-                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                            if widgets::row_button(ui, "Cancel", None, 90.0).clicked() {
-                                *cancel = true;
-                            }
-                            if widgets::row_button(ui, "Save", Some(widgets::GREEN), 90.0).clicked() {
-                                *close_and_save = true;
-                            }
-                        });
-                        ui.add_space(6.0);
+                        if widgets::row_button(ui, "Save", Some(widgets::GREEN), 90.0).clicked() {
+                            *close_and_save = true;
+                        }
                     });
+                    ui.add_space(6.0);
+                });
 
                 egui::ScrollArea::vertical().show(ui, |ui| {
                     autostart::editor_body(ui, editor);
@@ -405,7 +415,6 @@ impl LvrApp {
         }
     }
 
-
     fn request_stop_all(&mut self) {
         if self.shared.config().general.confirm_stop_all {
             self.confirming_stop_all = true;
@@ -437,7 +446,7 @@ impl eframe::App for LvrApp {
         if self.shared.is_quitting() {
             ctx.send_viewport_cmd(ViewportCommand::Close);
         } else if ctx.input(|i| i.viewport().close_requested()) {
-            if self.shared.config().general.close_to_tray {
+            if self.shared.tray_available() && self.shared.config().general.close_to_tray {
                 ctx.send_viewport_cmd(ViewportCommand::CancelClose);
                 ctx.send_viewport_cmd(ViewportCommand::Visible(false));
             } else {
@@ -622,5 +631,51 @@ mod tests {
         let count = labels.len();
         labels.dedup();
         assert_eq!(labels.len(), count);
+    }
+}
+
+#[cfg(test)]
+mod render_tests {
+    use super::*;
+    #[test]
+    fn all_tabs_render_without_a_window_or_running_vr_session() {
+        let config = Config::default();
+        let dir = tempfile::tempdir().unwrap();
+        let (shared, _receiver) = Shared::new(config.clone(), dir.path().join("config.toml"));
+        let mut app = LvrApp {
+            shared,
+            status: Status::default(),
+            tab: Tab::Dashboard,
+            editor: None,
+            confirming_stop_all: false,
+            saved_config: config,
+            dirty_since: None,
+            applied_zoom: 1.0,
+            log_levels: [true; 4],
+            log_filter: String::new(),
+            log_wrap: true,
+        };
+        let context = egui::Context::default();
+        install_style(&context);
+        for width in [480.0, 1120.0] {
+            for tab in Tab::ALL {
+                let mut output = context.run_ui(egui::RawInput::default(), |ui| {
+                    ui.set_max_width(width);
+                    match tab {
+                        Tab::Dashboard => dashboard::show(&mut app, ui),
+                        Tab::Autostart => autostart::show(&mut app, ui),
+                        Tab::Audio => audio_tab::show(&mut app, ui),
+                        Tab::Settings => settings::show(&mut app, ui),
+                        Tab::Logs => logs::show(&mut app, ui),
+                    }
+                });
+                output.textures_delta.clear();
+                assert!(!output.shapes.is_empty(), "{tab:?} should render content");
+            }
+        }
+        assert!(
+            !dir.path().join("config.toml").exists(),
+            "rendering must not write config"
+        );
     }
 }

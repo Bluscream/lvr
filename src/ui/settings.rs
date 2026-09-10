@@ -294,6 +294,13 @@ fn vrc_files_and_tools(app: &mut LvrApp, ui: &mut Ui) {
         .spacing([14.0, 12.0])
         .min_col_width(190.0)
         .show(ui, |ui| {
+            ui.label("VRChat prefix");
+            {
+                let mut config = app.shared.config();
+                ui.text_edit_singleline(&mut config.domain_block.prefix)
+                    .on_hover_text("Leave blank to discover automatically; accepts the app prefix directory or its pfx directory");
+            }
+            ui.end_row();
             ui.label("Load Community Blocklists");
             {
                 let mut config = app.shared.config();
@@ -307,6 +314,7 @@ fn vrc_files_and_tools(app: &mut LvrApp, ui: &mut Ui) {
                 }
             }
             ui.end_row();
+
 
             ui.label("DNS Shield (Steam)");
             ui.horizontal(|ui| {
@@ -356,8 +364,9 @@ fn vrc_files_and_tools(app: &mut LvrApp, ui: &mut Ui) {
     render_domains_blocked_grid(ui, &lists, &app.status.block_state);
     ui.add_space(8.0);
 
-    let prefix_opt = crate::domain_block::detect_vrc_prefix("");
-    render_vrc_prefix_section(ui, prefix_opt.as_deref());
+    let prefix_opt =
+        crate::domain_block::detect_vrc_prefix(&app.shared.config().domain_block.prefix.clone());
+    render_vrc_prefix_section(app, ui, prefix_opt.as_deref());
 }
 
 fn render_domains_blocked_grid(
@@ -387,7 +396,11 @@ fn render_domains_blocked_grid(
             for cat in &categories {
                 ui.label(lists.count_for_category(cat).to_string());
             }
-            ui.label(RichText::new(lists.total_count().to_string()).strong().color(BLUE));
+            ui.label(
+                RichText::new(lists.total_count().to_string())
+                    .strong()
+                    .color(BLUE),
+            );
             ui.end_row();
 
             // Row 2: Actually Blocked domains right now
@@ -410,14 +423,21 @@ fn render_domains_blocked_grid(
                 ui.label(RichText::new(text).color(color));
             }
 
-            let total_color = if total_blocked > 0 { super::widgets::RED } else { GREY };
-            ui.label(RichText::new(total_blocked.to_string()).strong().color(total_color));
+            let total_color = if total_blocked > 0 {
+                super::widgets::RED
+            } else {
+                GREY
+            };
+            ui.label(
+                RichText::new(total_blocked.to_string())
+                    .strong()
+                    .color(total_color),
+            );
             ui.end_row();
         });
 }
 
-
-fn render_vrc_prefix_section(ui: &mut Ui, prefix_opt: Option<&std::path::Path>) {
+fn render_vrc_prefix_section(app: &LvrApp, ui: &mut Ui, prefix_opt: Option<&std::path::Path>) {
     match prefix_opt {
         Some(prefix) => {
             let hosts_file = crate::domain_block::prefix_hosts_path(prefix);
@@ -425,22 +445,11 @@ fn render_vrc_prefix_section(ui: &mut Ui, prefix_opt: Option<&std::path::Path>) 
 
             ui.horizontal_wrapped(|ui| {
                 if widgets::row_button(ui, "📄 Open Hosts File", Some(BLUE), 180.0).clicked() {
-                    if let Some(parent) = hosts_file.parent() {
-                        let _ = std::fs::create_dir_all(parent);
-                    }
-                    if !hosts_file.exists() {
-                        let _ = std::fs::write(&hosts_file, "127.0.0.1 localhost\n::1 localhost\n");
-                    }
-                    let _ = std::process::Command::new("xdg-open")
-                        .arg(&hosts_file)
-                        .spawn();
+                    open_prefix_path(app, &hosts_file, true);
                 }
 
                 if widgets::row_button(ui, "🛠 Open Tools Folder", Some(GREEN), 180.0).clicked() {
-                    let _ = std::fs::create_dir_all(&tools_dir);
-                    let _ = std::process::Command::new("xdg-open")
-                        .arg(&tools_dir)
-                        .spawn();
+                    open_prefix_path(app, &tools_dir, false);
                 }
             });
 
@@ -653,5 +662,28 @@ fn open_config_folder(app: &LvrApp) {
         Err(err) => app
             .shared
             .warn(format!("Could not open {}: {err}", dir.display())),
+    }
+}
+
+fn open_prefix_path(app: &LvrApp, path: &std::path::Path, file: bool) {
+    let result = (|| -> anyhow::Result<()> {
+        if file && !path.exists() {
+            crate::files::atomic_write(path, b"127.0.0.1 localhost\n::1 localhost\n")?;
+        }
+        if !file {
+            std::fs::create_dir_all(path)?;
+        }
+        let mut child = std::process::Command::new("xdg-open").arg(path).spawn()?;
+        let shared = app.shared.clone();
+        std::thread::spawn(move || {
+            if !child.wait().is_ok_and(|status| status.success()) {
+                shared.warn("Opening the prefix path failed");
+            }
+        });
+        Ok(())
+    })();
+    if let Err(err) = result {
+        app.shared
+            .error(format!("Opening {} failed: {err:#}", path.display()));
     }
 }

@@ -35,7 +35,11 @@ impl ProcSnapshot {
         self.procs
             .iter()
             .filter(|p| !exclude.contains(&p.pid))
-            .filter(|p| patterns.iter().any(|pat| p.haystack.contains(pat)))
+            .filter(|p| {
+                patterns
+                    .iter()
+                    .any(|pat| !pat.trim().is_empty() && p.haystack.contains(pat))
+            })
             .map(|p| p.pid)
             .collect()
     }
@@ -54,10 +58,11 @@ impl ProcSnapshot {
                     continue;
                 }
                 if let Some(ppid) = p.ppid
-                    && pids.contains(&ppid) {
-                        pids.push(p.pid);
-                        added = true;
-                    }
+                    && pids.contains(&ppid)
+                {
+                    pids.push(p.pid);
+                    added = true;
+                }
             }
         }
     }
@@ -74,6 +79,7 @@ impl ProcessScanner {
         let refresh = RefreshKind::nothing().with_processes(
             ProcessRefreshKind::nothing()
                 .with_cmd(UpdateKind::Always)
+                .with_user(UpdateKind::OnlyIfNotSet)
                 .with_exe(UpdateKind::OnlyIfNotSet)
                 .without_tasks(),
         );
@@ -86,10 +92,13 @@ impl ProcessScanner {
     pub fn scan(&mut self) -> ProcSnapshot {
         let refresh = ProcessRefreshKind::nothing()
             .with_cmd(UpdateKind::Always)
-            .with_exe(UpdateKind::OnlyIfNotSet);
+            .with_user(UpdateKind::OnlyIfNotSet)
+            .with_exe(UpdateKind::OnlyIfNotSet)
+            .without_tasks();
         self.system
             .refresh_processes_specifics(ProcessesToUpdate::All, true, refresh);
 
+        let uid = unsafe { libc::geteuid() };
         let procs = self
             .system
             .processes()
@@ -98,6 +107,7 @@ impl ProcessScanner {
             // app would otherwise show up as a hundred "processes" — and get a
             // hundred signals when stopped.
             .filter(|(_, proc)| proc.thread_kind().is_none())
+            .filter(|(_, proc)| proc.user_id().is_some_and(|user| **user == uid))
             .map(|(pid, proc)| {
                 let mut haystack = proc.name().to_string_lossy().to_lowercase();
                 if let Some(exe) = proc.exe() {
@@ -158,6 +168,9 @@ pub fn is_alive(pid: u32) -> bool {
 }
 
 fn signal(pid: u32, sig: libc::c_int) -> bool {
+    if pid == 1 || pid == std::process::id() {
+        return false;
+    }
     let Some(pid) = signalable(pid) else {
         return false;
     };
@@ -337,12 +350,17 @@ pub async fn run_capture(argv: &[String]) -> Result<String> {
         bail!("empty command");
     };
     let program = resolve_program(program)?;
-    let output = tokio::process::Command::new(&program)
-        .args(args)
-        .stdin(Stdio::null())
-        .output()
-        .await
-        .with_context(|| format!("running `{}`", argv.join(" ")))?;
+    let output = tokio::time::timeout(
+        Duration::from_secs(30),
+        tokio::process::Command::new(&program)
+            .args(args)
+            .stdin(Stdio::null())
+            .kill_on_drop(true)
+            .output(),
+    )
+    .await
+    .with_context(|| format!("helper timed out after 30s: {}", argv.join(" ")))?
+    .with_context(|| format!("running `{}`", argv.join(" ")))?;
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
         bail!("`{}` failed: {}", argv.join(" "), stderr);
@@ -379,12 +397,15 @@ pub fn spawn_command_line(line: &str) -> Result<Child> {
 #[derive(Default)]
 pub struct ChildRegistry {
     children: HashMap<String, Child>,
+    retired: Vec<Child>,
 }
 
 impl ChildRegistry {
     pub fn insert(&mut self, id: &str, child: Child) {
-        if let Some(mut previous) = self.children.insert(id.to_string(), child) {
-            let _ = previous.try_wait();
+        if let Some(mut previous) = self.children.insert(id.to_string(), child)
+            && matches!(previous.try_wait(), Ok(None))
+        {
+            self.retired.push(previous);
         }
     }
 
@@ -401,13 +422,17 @@ impl ChildRegistry {
     }
 
     pub fn forget(&mut self, id: &str) {
-        if let Some(mut child) = self.children.remove(id) {
-            let _ = child.try_wait();
+        if let Some(mut child) = self.children.remove(id)
+            && matches!(child.try_wait(), Ok(None))
+        {
+            self.retired.push(child);
         }
     }
 
     /// Reap every finished child; call once per tick.
     pub fn reap(&mut self) {
+        self.retired
+            .retain_mut(|child| matches!(child.try_wait(), Ok(None)));
         self.children.retain(|_, child| match child.try_wait() {
             Ok(Some(_)) | Err(_) => false,
             Ok(None) => true,

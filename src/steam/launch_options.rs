@@ -3,9 +3,9 @@
 use anyhow::Result;
 use std::fs;
 
+use super::VRCHAT_APPID;
 use super::paths::SteamPaths;
 use super::vdf::{edit_vdf, find_value};
-use super::VRCHAT_APPID;
 
 /// Read the current Steam LaunchOptions string configured for an app.
 pub fn read_launch_options(app_id: &str) -> Result<String> {

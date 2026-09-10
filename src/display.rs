@@ -11,6 +11,8 @@ use std::process::{Child, Command, Stdio};
 use std::sync::Mutex;
 use tracing::{info, warn};
 
+static OWNED_CONNECTOR: Mutex<Option<String>> = Mutex::new(None);
+
 static VIRTUAL_MONITOR_CHILD: Mutex<Option<Child>> = Mutex::new(None);
 
 /// Parsed display mode specifications.
@@ -27,7 +29,12 @@ impl ParsedMode {
     pub fn parse(s: &str) -> Self {
         let trimmed = s.trim();
         let (res_part, hz) = if let Some((res, hz_str)) = trimmed.split_once('@') {
-            let hz_val = hz_str.parse::<f64>().unwrap_or(60.0).clamp(24.0, 360.0);
+            let hz_val = hz_str
+                .parse::<f64>()
+                .ok()
+                .filter(|v| v.is_finite())
+                .unwrap_or(60.0)
+                .clamp(24.0, 360.0);
             (res, (hz_val * 1000.0).round() as u32)
         } else {
             (trimmed, 60_000)
@@ -74,16 +81,22 @@ struct OutputInfo {
     is_virtual: bool,
 }
 
-fn query_outputs() -> Vec<OutputInfo> {
-    let output = match Command::new("kscreen-doctor").arg("-j").output() {
+fn doctor_command() -> Command {
+    let mut command = Command::new("timeout");
+    command.args(["5s", "kscreen-doctor"]);
+    command
+}
+
+fn query_outputs() -> Option<Vec<OutputInfo>> {
+    let output = match doctor_command().arg("-j").output() {
         Ok(out) if out.status.success() => out.stdout,
         Ok(out) => {
             warn!("kscreen-doctor -j exited with status {}", out.status);
-            return Vec::new();
+            return None;
         }
         Err(err) => {
             warn!("Failed to execute kscreen-doctor: {err}");
-            return Vec::new();
+            return None;
         }
     };
 
@@ -91,16 +104,30 @@ fn query_outputs() -> Vec<OutputInfo> {
         Ok(val) => val,
         Err(err) => {
             warn!("Failed to parse kscreen-doctor JSON output: {err}");
-            return Vec::new();
+            return None;
         }
     };
 
     let mut list = Vec::new();
     if let Some(outputs) = v.get("outputs").and_then(|o| o.as_array()) {
         for o in outputs {
-            let id = o.get("id").and_then(|i| i.as_str()).unwrap_or("").to_string();
-            let name = o.get("name").and_then(|n| n.as_str()).unwrap_or("").to_string();
-            let connected = o.get("connected").and_then(|c| c.as_bool()).unwrap_or(false);
+            let id = o
+                .get("id")
+                .map(|i| {
+                    i.as_str()
+                        .map(str::to_owned)
+                        .unwrap_or_else(|| i.to_string())
+                })
+                .unwrap_or_default();
+            let name = o
+                .get("name")
+                .and_then(|n| n.as_str())
+                .unwrap_or("")
+                .to_string();
+            let connected = o
+                .get("connected")
+                .and_then(|c| c.as_bool())
+                .unwrap_or(false);
             let enabled = o.get("enabled").and_then(|e| e.as_bool()).unwrap_or(false);
             let name_upper = name.to_ascii_uppercase();
             let is_virtual = name_upper.contains("VIRTUAL")
@@ -117,7 +144,7 @@ fn query_outputs() -> Vec<OutputInfo> {
             });
         }
     }
-    list
+    Some(list)
 }
 
 /// Check if a display connector actually has an active physical monitor with valid EDID.
@@ -130,14 +157,16 @@ fn connector_has_physical_edid(name: &str) -> bool {
             let file_name = entry.file_name();
             let s = file_name.to_string_lossy();
             // Match cardX-NAME (e.g. card1-DP-3 or card1-HDMI-A-1)
-            if s.ends_with(name) {
+            if s.ends_with(&format!("-{name}")) {
                 let status_path = entry.path().join("status");
                 let edid_path = entry.path().join("edid");
                 if let Ok(status) = fs::read_to_string(&status_path)
                     && status.trim() == "connected"
-                        && let Ok(edid) = fs::read(&edid_path) {
-                            return !edid.is_empty();
-                        }
+                    && let Ok(edid) = fs::read(&edid_path)
+                {
+                    return !edid.is_empty();
+                }
+                return false;
             }
         }
     }
@@ -146,11 +175,15 @@ fn connector_has_physical_edid(name: &str) -> bool {
 }
 
 /// Query the total number of connected physical displays.
-pub fn get_connected_display_count() -> usize {
-    query_outputs()
-        .into_iter()
-        .filter(|o| o.connected && o.enabled && !o.is_virtual && connector_has_physical_edid(&o.name))
-        .count()
+pub fn get_connected_display_count() -> Option<usize> {
+    Some(
+        query_outputs()?
+            .into_iter()
+            .filter(|o| {
+                o.connected && o.enabled && !o.is_virtual && connector_has_physical_edid(&o.name)
+            })
+            .count(),
+    )
 }
 
 /// Create/enable a virtual display.
@@ -177,7 +210,10 @@ pub fn create_virtual_display(resolution: &str) -> Option<String> {
         .stderr(Stdio::null())
         .spawn()
     {
-        info!("Spawned krfb-virtualmonitor (PID: {}) with resolution {res_str}", child.id());
+        info!(
+            "Spawned krfb-virtualmonitor (PID: {}) with resolution {res_str}",
+            child.id()
+        );
         if let Ok(mut lock) = VIRTUAL_MONITOR_CHILD.lock() {
             *lock = Some(child);
         }
@@ -185,25 +221,41 @@ pub fn create_virtual_display(resolution: &str) -> Option<String> {
         // Give KWin a moment to register the new Wayland output
         std::thread::sleep(std::time::Duration::from_millis(1500));
 
-        let outputs = query_outputs();
-        if let Some(virt) = outputs.iter().find(|o| o.is_virtual || o.name.contains("VR-Headset")) {
-            let name = if !virt.name.is_empty() { &virt.name } else { "Virtual-VR-Headset" };
+        let outputs = query_outputs().unwrap_or_default();
+        if let Some(virt) = outputs
+            .iter()
+            .find(|o| o.is_virtual || o.name.contains("VR-Headset"))
+        {
+            let name = if !virt.name.is_empty() {
+                &virt.name
+            } else {
+                "Virtual-VR-Headset"
+            };
             info!("Virtual display successfully registered in KWin: {name}");
             return Some(format!("{name} ({mode_str})"));
         }
-        return Some(format!("Virtual-VR-Headset ({mode_str})"));
+        warn!("Virtual monitor did not register an output; cleaning up failed launch");
+        remove_virtual_display();
+        return None;
     }
 
     // 2. Fallback to kscreen-doctor if krfb-virtualmonitor binary wasn't found
-    let outputs = query_outputs();
-    if let Some(virt) = outputs.iter().find(|o| o.is_virtual) {
-        let target = if !virt.name.is_empty() { &virt.name } else { &virt.id };
+    let outputs = query_outputs()?;
+    if let Some(virt) = outputs.iter().find(|o| o.is_virtual && !o.enabled) {
+        let target = if !virt.name.is_empty() {
+            &virt.name
+        } else {
+            &virt.id
+        };
         info!("Found virtual output connector {target}; enabling via kscreen-doctor");
-        let status = Command::new("kscreen-doctor")
+        let status = doctor_command()
             .arg(format!("output.{target}.mode.{mode_str}"))
             .arg(format!("output.{target}.enable"))
             .status();
-        if let Ok(s) = status && s.success() {
+        if let Ok(s) = status
+            && s.success()
+        {
+            *OWNED_CONNECTOR.lock().unwrap_or_else(|e| e.into_inner()) = Some(target.clone());
             return Some(format!("{target} ({mode_str})"));
         }
     }
@@ -218,29 +270,29 @@ pub fn remove_virtual_display() -> bool {
 
     // 1. Terminate krfb-virtualmonitor child process if managed
     if let Ok(mut lock) = VIRTUAL_MONITOR_CHILD.lock()
-        && let Some(mut child) = lock.take() {
-            info!("Killing managed krfb-virtualmonitor process (PID: {})", child.id());
-            let _ = child.kill();
-            let _ = child.wait();
-            cleaned = true;
-        }
+        && let Some(mut child) = lock.take()
+    {
+        info!(
+            "Killing managed krfb-virtualmonitor process (PID: {})",
+            child.id()
+        );
+        let _ = child.kill();
+        let _ = child.wait();
+        cleaned = true;
+    }
 
-    // Also pkill any lingering krfb-virtualmonitor processes named VR-Headset
-    let _ = Command::new("pkill")
-        .arg("-f")
-        .arg("krfb-virtualmonitor.*VR-Headset")
-        .status();
-
-    // 2. Disable via kscreen-doctor if any virtual connector remains enabled
-    let outputs = query_outputs();
-    for virt in outputs.iter().filter(|o| o.is_virtual && o.enabled) {
-        let identifier = if !virt.name.is_empty() { &virt.name } else { &virt.id };
-        let status = Command::new("kscreen-doctor")
+    // Disable only a connector that this process explicitly enabled.
+    let mut owned = OWNED_CONNECTOR.lock().unwrap_or_else(|e| e.into_inner());
+    if let Some(identifier) = owned.as_ref() {
+        match doctor_command()
             .arg(format!("output.{identifier}.disable"))
-            .status();
-        if let Ok(s) = status && s.success() {
-            info!("Disabled virtual output {identifier} via kscreen-doctor");
-            cleaned = true;
+            .status()
+        {
+            Ok(status) if status.success() => {
+                *owned = None;
+                cleaned = true;
+            }
+            other => warn!("Could not disable managed virtual output {identifier}: {other:?}"),
         }
     }
 

@@ -208,6 +208,9 @@ fn apply(app: &mut LvrApp, action: Pending) {
         Pending::MoveUp(index) => {
             if index > 0 {
                 let mut config = app.shared.config();
+                if index >= config.autostart.len() {
+                    return;
+                }
                 config.autostart.swap(index, index - 1);
                 app.shared.send(Command::Poke);
             }
@@ -293,7 +296,11 @@ pub fn editor_body(ui: &mut Ui, editor: &mut EntryEditor) {
                         .range(0..=3600)
                         .suffix(" seconds"),
                 );
-                ui.label(RichText::new("wait this long after trigger appears").size(12.0).color(GREY));
+                ui.label(
+                    RichText::new("wait this long after trigger appears")
+                        .size(12.0)
+                        .color(GREY),
+                );
             });
             ui.end_row();
 
@@ -326,10 +333,18 @@ fn render_editor_trigger_field(ui: &mut Ui, editor: &mut EntryEditor) {
     ui.vertical(|ui| {
         let kinds = crate::config::Trigger::KINDS;
         egui::ComboBox::from_id_salt("editor-trigger-kind")
-            .selected_text(kinds.get(editor.trigger_kind).copied().unwrap_or("Manual only"))
+            .selected_text(
+                kinds
+                    .get(editor.trigger_kind)
+                    .copied()
+                    .unwrap_or("Manual only"),
+            )
             .show_ui(ui, |ui| {
                 for (index, kind) in kinds.iter().enumerate() {
-                    if ui.selectable_label(editor.trigger_kind == index, *kind).clicked() {
+                    if ui
+                        .selectable_label(editor.trigger_kind == index, *kind)
+                        .clicked()
+                    {
                         editor.trigger_kind = index;
                     }
                 }
@@ -346,7 +361,11 @@ fn render_editor_trigger_field(ui: &mut Ui, editor: &mut EntryEditor) {
 
 fn render_editor_stop_behavior_field(ui: &mut Ui, editor: &mut EntryEditor) {
     ui.vertical(|ui| {
-        ui.radio_value(&mut editor.grace_mode, GraceMode::After, "Stop after grace period");
+        ui.radio_value(
+            &mut editor.grace_mode,
+            GraceMode::After,
+            "Stop after grace period",
+        );
         if editor.grace_mode == GraceMode::After {
             ui.horizontal(|ui| {
                 ui.add_space(20.0);
@@ -357,8 +376,16 @@ fn render_editor_stop_behavior_field(ui: &mut Ui, editor: &mut EntryEditor) {
                 );
             });
         }
-        ui.radio_value(&mut editor.grace_mode, GraceMode::Immediately, "Stop immediately when trigger disappears");
-        ui.radio_value(&mut editor.grace_mode, GraceMode::KeepRunning, "Keep running (never stops automatically)");
+        ui.radio_value(
+            &mut editor.grace_mode,
+            GraceMode::Immediately,
+            "Stop immediately when trigger disappears",
+        );
+        ui.radio_value(
+            &mut editor.grace_mode,
+            GraceMode::KeepRunning,
+            "Keep running (never stops automatically)",
+        );
     });
 }
 
