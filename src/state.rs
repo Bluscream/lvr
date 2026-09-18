@@ -237,6 +237,9 @@ struct Inner {
     log_capacity: AtomicUsize,
     /// Set when the tray (or a second instance) wants the window on screen.
     show_window: AtomicBool,
+    /// Whether the viewport is actually on screen. Status and log updates do
+    /// not repaint a hidden window — nobody would see the frame.
+    window_visible: AtomicBool,
     /// Tab a second launch asked for, by name.
     requested_tab: Mutex<Option<String>>,
     /// Set when the app should exit for real rather than hide to tray.
@@ -261,6 +264,7 @@ impl Shared {
                 commands: tx,
                 log_capacity,
                 show_window: AtomicBool::new(false),
+                window_visible: AtomicBool::new(true),
                 requested_tab: Mutex::new(None),
                 quitting: AtomicBool::new(false),
                 supervisor_failed: AtomicBool::new(false),
@@ -369,15 +373,33 @@ impl Shared {
         *lock(&self.inner.repaint) = Some(ctx);
     }
 
+    /// Ask for a frame *if anyone is looking*. Dropped while the window is
+    /// hidden in the tray: a repainted invisible viewport is pure cost.
     pub fn request_repaint(&self) {
+        if self.window_visible() {
+            self.wake_gui();
+        }
+    }
+
+    /// Ask for a frame unconditionally, including while hidden. Only for things
+    /// the GUI loop must observe to make progress — being shown, and quitting.
+    pub fn wake_gui(&self) {
         if let Some(ctx) = lock(&self.inner.repaint).as_ref() {
             ctx.request_repaint();
         }
     }
 
+    pub fn window_visible(&self) -> bool {
+        self.inner.window_visible.load(Ordering::SeqCst)
+    }
+
+    pub fn set_window_visible(&self, visible: bool) {
+        self.inner.window_visible.store(visible, Ordering::SeqCst);
+    }
+
     pub fn request_show_window(&self) {
         self.inner.show_window.store(true, Ordering::SeqCst);
-        self.request_repaint();
+        self.wake_gui();
     }
 
     pub fn take_show_window(&self) -> bool {
@@ -396,7 +418,8 @@ impl Shared {
 
     pub fn set_quitting(&self) {
         self.inner.quitting.store(true, Ordering::SeqCst);
-        self.request_repaint();
+        // Must reach the GUI loop even when hidden, or the app never closes.
+        self.wake_gui();
     }
 
     pub fn tray_available(&self) -> bool {

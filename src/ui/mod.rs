@@ -441,6 +441,7 @@ impl eframe::App for LvrApp {
             }
             ctx.send_viewport_cmd(ViewportCommand::Visible(true));
             ctx.send_viewport_cmd(ViewportCommand::Focus);
+            self.shared.set_window_visible(true);
         }
 
         if self.shared.is_quitting() {
@@ -449,16 +450,20 @@ impl eframe::App for LvrApp {
             if self.shared.tray_available() && self.shared.config().general.close_to_tray {
                 ctx.send_viewport_cmd(ViewportCommand::CancelClose);
                 ctx.send_viewport_cmd(ViewportCommand::Visible(false));
+                self.shared.set_window_visible(false);
             } else {
                 self.shared.set_quitting();
                 self.shared.send(Command::Quit);
             }
         }
 
-        self.autosave();
-
-        // Keep countdowns ticking even when nothing else asks for a repaint.
-        ctx.request_repaint_after(Duration::from_millis(500));
+        // Config is only edited from widgets, which need a visible window; the
+        // tray's own toggles persist themselves via Command::SaveConfig.
+        if self.shared.window_visible() {
+            self.autosave();
+            // Keep countdowns ticking even when nothing else asks for a repaint.
+            ctx.request_repaint_after(Duration::from_millis(500));
+        }
     }
 
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {

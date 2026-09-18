@@ -156,6 +156,7 @@ fn main() -> Result<()> {
     let start_hidden = !args.no_tray && args.hidden.unwrap_or(config.general.start_hidden);
     let (shared, rx) = Shared::new(config, config_path.clone());
     shared.set_tray_available(!args.no_tray);
+    shared.set_window_visible(!start_hidden);
     shared.info(format!("Config: {}", config_path.display()));
 
     if let Some(listener) = listener {
