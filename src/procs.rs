@@ -1,6 +1,6 @@
 //! Process discovery, launching and stopping.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::time::Duration;
@@ -29,37 +29,50 @@ impl ProcSnapshot {
     /// Pids whose command line contains any of `patterns` (already lowercased),
     /// excluding `exclude`.
     pub fn matching(&self, patterns: &[String], exclude: &[u32]) -> Vec<u32> {
-        if patterns.is_empty() {
-            return Vec::new();
-        }
-        self.procs
-            .iter()
-            .filter(|p| !exclude.contains(&p.pid))
-            .filter(|p| {
-                patterns
-                    .iter()
-                    .any(|pat| !pat.trim().is_empty() && p.haystack.contains(pat))
-            })
-            .map(|p| p.pid)
-            .collect()
+        self.matches(patterns, exclude).map(|p| p.pid).collect()
     }
 
     pub fn any_matching(&self, patterns: &[String], exclude: &[u32]) -> bool {
-        !self.matching(patterns, exclude).is_empty()
+        // Short-circuits on the first hit; `matching` would scan the whole
+        // table and allocate a Vec only to ask whether it was empty.
+        self.matches(patterns, exclude).next().is_some()
+    }
+
+    /// Processes matching any non-blank pattern and not in `exclude`.
+    fn matches<'a>(
+        &'a self,
+        patterns: &'a [String],
+        exclude: &'a [u32],
+    ) -> impl Iterator<Item = &'a ProcInfo> + 'a {
+        // Blank patterns are dropped once here rather than re-trimmed for
+        // every process on every scan.
+        let patterns: Vec<&str> = patterns
+            .iter()
+            .map(|pat| pat.trim())
+            .filter(|pat| !pat.is_empty())
+            .collect();
+        self.procs.iter().filter(move |p| {
+            !exclude.contains(&p.pid) && patterns.iter().any(|pat| p.haystack.contains(pat))
+        })
     }
 
     /// Recursively append all processes whose parent or ancestor is in `pids`.
     pub fn expand_children(&self, pids: &mut Vec<u32>, exclude: &[u32]) {
+        // Membership drove three linear scans of `pids` per process per round,
+        // which is quadratic in the size of a tree being stopped.
+        let mut known: HashSet<u32> = pids.iter().copied().collect();
+        let excluded: HashSet<u32> = exclude.iter().copied().collect();
         let mut added = true;
         while added {
             added = false;
             for p in &self.procs {
-                if exclude.contains(&p.pid) || pids.contains(&p.pid) {
+                if excluded.contains(&p.pid) || known.contains(&p.pid) {
                     continue;
                 }
                 if let Some(ppid) = p.ppid
-                    && pids.contains(&ppid)
+                    && known.contains(&ppid)
                 {
+                    known.insert(p.pid);
                     pids.push(p.pid);
                     added = true;
                 }
