@@ -11,6 +11,7 @@ use std::fs;
 use std::net::IpAddr;
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, RwLock};
 
 use anyhow::{Context, Result};
@@ -39,6 +40,22 @@ pub const DOMAINS_CACHE_MAX_AGE: std::time::Duration = std::time::Duration::from
 pub type DomainMap = BTreeMap<String, Vec<String>>;
 
 static ACTIVE_DOMAIN_MAP: RwLock<Option<Arc<DomainMap>>> = RwLock::new(None);
+
+/// Bumped every time [`ACTIVE_DOMAIN_MAP`] is replaced, so pollers can tell
+/// whether the lists changed without cloning and comparing thousands of
+/// domains.
+static ACTIVE_DOMAIN_GENERATION: AtomicU64 = AtomicU64::new(0);
+
+/// Current revision of the active domain lists. Only equality is meaningful.
+pub fn active_domain_generation() -> u64 {
+    ACTIVE_DOMAIN_GENERATION.load(Ordering::SeqCst)
+}
+
+/// Install a new active domain map and publish it as a new generation.
+fn set_active_domain_map(map: DomainMap) {
+    *ACTIVE_DOMAIN_MAP.write().unwrap_or_else(|e| e.into_inner()) = Some(Arc::new(map));
+    ACTIVE_DOMAIN_GENERATION.fetch_add(1, Ordering::SeqCst);
+}
 
 /// Represents the toggleable blocking categories.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]

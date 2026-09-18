@@ -13,7 +13,8 @@ mod tests;
 pub use entries::EntryRuntime;
 
 use std::collections::HashMap;
-use std::time::{Duration, Instant};
+use std::fs;
+use std::time::{Duration, Instant, SystemTime};
 
 use tokio::sync::mpsc::UnboundedReceiver;
 
@@ -50,6 +51,9 @@ pub struct Engine {
     cached_default_source: String,
     block_state: crate::domain_block::BlockState,
     last_media_block_poll: Option<Instant>,
+    /// Inputs of the last successful `sync_all`, so an unchanged policy does
+    /// not rewrite the hosts file over and over.
+    synced_media_block: Option<(crate::domain_block::BlockState, u64, Option<SystemTime>)>,
     virtual_display_created: bool,
     virtual_display_info: Option<String>,
     steam_launch_options: crate::steam::launch_options::LaunchOptionsCache,
@@ -83,6 +87,7 @@ impl Engine {
             cached_default_source: String::new(),
             block_state,
             last_media_block_poll: None,
+            synced_media_block: None,
             virtual_display_created: false,
             virtual_display_info: None,
             steam_launch_options: crate::steam::launch_options::LaunchOptionsCache::default(),
@@ -482,11 +487,40 @@ impl Engine {
         self.last_media_block_poll = Some(Instant::now());
 
         let prefix_setting = self.shared.config().domain_block.prefix.clone();
-        if let Some(prefix) = crate::domain_block::detect_vrc_prefix(&prefix_setting)
-            && let Err(err) = crate::domain_block::sync_all(&prefix, &self.block_state)
-        {
-            self.shared
-                .error(format!("Refreshing domain/media policy failed: {err:#}"));
+        let Some(prefix) = crate::domain_block::detect_vrc_prefix(&prefix_setting) else {
+            return;
+        };
+
+        // sync_all reads the hosts file, stages a copy, and rewrites that copy
+        // once per category before diffing it back — so it is far too costly to
+        // repeat every few seconds when nothing can have changed. The desired
+        // policy, the domain lists and the file itself are all it depends on.
+        let hosts_mtime = fs::metadata(crate::domain_block::prefix_hosts_path(&prefix))
+            .and_then(|m| m.modified())
+            .ok();
+        let key = (
+            self.block_state.clone(),
+            crate::domain_block::active_domain_generation(),
+            hosts_mtime,
+        );
+        if self.synced_media_block.as_ref() == Some(&key) {
+            return;
+        }
+
+        match crate::domain_block::sync_all(&prefix, &self.block_state) {
+            // Re-stat: sync_all may have rewritten the file, and caching the
+            // pre-write mtime would force a pointless re-sync next round.
+            Ok(()) => {
+                let written = fs::metadata(crate::domain_block::prefix_hosts_path(&prefix))
+                    .and_then(|m| m.modified())
+                    .ok();
+                self.synced_media_block = Some((key.0, key.1, written));
+            }
+            // Leave the cache untouched so the failure is retried.
+            Err(err) => {
+                self.shared
+                    .error(format!("Refreshing domain/media policy failed: {err:#}"));
+            }
         }
     }
 

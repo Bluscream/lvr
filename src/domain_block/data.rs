@@ -243,14 +243,14 @@ async fn load_configured_domains(cfg: &crate::config::DomainBlockConfig, force: 
 
 pub async fn init_from_remote_or_fallback_with_config(cfg: &crate::config::DomainBlockConfig) {
     let loaded = load_configured_domains(cfg, false).await;
-    *ACTIVE_DOMAIN_MAP.write().unwrap_or_else(|e| e.into_inner()) = Some(Arc::new(loaded));
+    set_active_domain_map(loaded);
 }
 
 pub async fn reload_domain_lists_with_config(
     cfg: &crate::config::DomainBlockConfig,
 ) -> DomainLists {
     let loaded = load_configured_domains(cfg, true).await;
-    *ACTIVE_DOMAIN_MAP.write().unwrap_or_else(|e| e.into_inner()) = Some(Arc::new(loaded));
+    set_active_domain_map(loaded);
     active_domains()
 }
 
