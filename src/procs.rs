@@ -3,6 +3,7 @@
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result, anyhow, bail};
@@ -11,7 +12,7 @@ use sysinfo::{ProcessRefreshKind, ProcessesToUpdate, RefreshKind, System, Update
 use crate::config::AutostartEntry;
 
 /// One process as seen by a scan.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct ProcInfo {
     pub pid: u32,
     pub ppid: Option<u32>,
@@ -88,6 +89,10 @@ impl ProcSnapshot {
 /// set moving.
 const FULL_RESCAN_INTERVAL: Duration = Duration::from_secs(30);
 
+/// Shared so a tick can hold the snapshot without copying it, which also lets
+/// the scanner keep — and overwrite — its buffers between scans.
+pub type SharedSnapshot = Arc<ProcSnapshot>;
+
 /// Repeatedly scans the process table, reusing one `System` for efficiency.
 ///
 /// A full refresh reads the name, exe and full argv of every process, which is
@@ -98,7 +103,7 @@ const FULL_RESCAN_INTERVAL: Duration = Duration::from_secs(30);
 pub struct ProcessScanner {
     system: System,
     self_pid: u32,
-    cached: ProcSnapshot,
+    cached: SharedSnapshot,
     /// Every pid in `/proc` at the last full scan, ours and other users' alike.
     known_pids: HashSet<u32>,
     last_full: Option<Instant>,
@@ -116,14 +121,14 @@ impl ProcessScanner {
         Self {
             system: System::new_with_specifics(refresh),
             self_pid: std::process::id(),
-            cached: ProcSnapshot::default(),
+            cached: SharedSnapshot::default(),
             known_pids: HashSet::new(),
             last_full: None,
         }
     }
 
     /// The current process table, refreshed only as much as it has to be.
-    pub fn scan(&mut self) -> ProcSnapshot {
+    pub fn scan(&mut self) -> SharedSnapshot {
         let live = read_pids();
         let due = self
             .last_full
@@ -136,7 +141,9 @@ impl ProcessScanner {
             self.full_scan(live);
         } else {
             // Nothing new; the snapshot can only have lost entries.
-            self.cached.procs.retain(|proc| live.contains(&proc.pid));
+            Arc::make_mut(&mut self.cached)
+                .procs
+                .retain(|proc| live.contains(&proc.pid));
             self.known_pids = live;
         }
         self.cached.clone()
@@ -154,35 +161,55 @@ impl ProcessScanner {
             .refresh_processes_specifics(ProcessesToUpdate::All, true, refresh);
 
         let uid = unsafe { libc::geteuid() };
-        let procs = self
-            .system
-            .processes()
-            .iter()
+        let self_pid = self.self_pid;
+        // Callers drop their handle at the end of a tick, so this is normally
+        // uncontended and hands back the buffers from the previous scan.
+        let snapshot = Arc::make_mut(&mut self.cached);
+
+        let mut filled = 0;
+        for (pid, proc) in self.system.processes() {
             // Threads share their process' command line, so a single Electron
             // app would otherwise show up as a hundred "processes" — and get a
             // hundred signals when stopped.
-            .filter(|(_, proc)| proc.thread_kind().is_none())
-            .filter(|(_, proc)| proc.user_id().is_some_and(|user| **user == uid))
-            .map(|(pid, proc)| {
-                let mut haystack = proc.name().to_string_lossy().to_lowercase();
-                if let Some(exe) = proc.exe() {
-                    haystack.push(' ');
-                    haystack.push_str(&exe.to_string_lossy().to_lowercase());
-                }
-                for arg in proc.cmd() {
-                    haystack.push(' ');
-                    haystack.push_str(&arg.to_string_lossy().to_lowercase());
-                }
-                ProcInfo {
-                    pid: pid.as_u32(),
-                    ppid: proc.parent().map(|p| p.as_u32()),
-                    haystack,
-                }
-            })
-            .filter(|p| p.pid != self.self_pid)
-            .collect();
-        self.cached = ProcSnapshot { procs };
+            if proc.thread_kind().is_some() {
+                continue;
+            }
+            if !proc.user_id().is_some_and(|user| **user == uid) {
+                continue;
+            }
+            let pid = pid.as_u32();
+            if pid == self_pid {
+                continue;
+            }
+
+            // Overwrite the slot in place. `String::clear` keeps the
+            // allocation, so a steady process table stops allocating entirely
+            // after the first scan instead of churning one String per process.
+            if filled == snapshot.procs.len() {
+                snapshot.procs.push(ProcInfo::default());
+            }
+            let slot = &mut snapshot.procs[filled];
+            slot.pid = pid;
+            slot.ppid = proc.parent().map(|p| p.as_u32());
+            slot.haystack.clear();
+            push_lowercase(&mut slot.haystack, &proc.name().to_string_lossy());
+            if let Some(exe) = proc.exe() {
+                slot.haystack.push(' ');
+                push_lowercase(&mut slot.haystack, &exe.to_string_lossy());
+            }
+            for arg in proc.cmd() {
+                slot.haystack.push(' ');
+                push_lowercase(&mut slot.haystack, &arg.to_string_lossy());
+            }
+            filled += 1;
+        }
+        snapshot.procs.truncate(filled);
     }
+}
+
+/// Append `text` lowercased, without allocating an intermediate `String`.
+fn push_lowercase(out: &mut String, text: &str) {
+    out.extend(text.chars().flat_map(char::to_lowercase));
 }
 
 /// Every pid currently in `/proc`, by directory listing alone.
