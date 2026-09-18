@@ -47,8 +47,6 @@ pub struct WivrnState {
     pub headset_connected: bool,
     pub session_running: bool,
     pub system_name: String,
-    pub bitrate: u32,
-    pub refresh_rate: f64,
 }
 
 /// Session-bus client. Reconnects lazily so `lvr` can start before WiVRn does.
@@ -134,8 +132,6 @@ impl WivrnClient {
             headset_connected,
             session_running: proxy.session_running().await.unwrap_or(false),
             system_name: proxy.system_name().await.unwrap_or_default(),
-            bitrate: proxy.bitrate().await.unwrap_or(0),
-            refresh_rate: proxy.preferred_refresh_rate().await.unwrap_or(0.0),
         }
     }
 
@@ -207,7 +203,7 @@ mod tests {
         assert!(!state.running);
         assert!(!state.headset_connected);
         assert!(!state.session_running);
-        assert_eq!(state.bitrate, 0);
+        assert!(state.system_name.is_empty());
     }
 
     #[test]
