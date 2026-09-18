@@ -12,6 +12,11 @@ is visible immediately instead of being noticed months later.
     metrics.py probe --binary PATH       measure the built binary's idle cost
     metrics.py report                    diff against the last run and store it
 
+Every build phase is labelled `cold` (it compiled something) or `warm` (fully
+cached). Timing and memory are only compared between runs in the same state --
+a warm phase is seconds faster than a cold one no matter what the code does, and
+reporting that as a 90% improvement is worse than reporting nothing.
+
 State lives in `.metrics/`: `current.json` for the run in progress, `last.json`
 for the previous completed run, `history.jsonl` for everything before that. It
 is machine-specific and gitignored -- comparisons are only meaningful against
@@ -107,7 +112,32 @@ def current_run() -> dict:
     if not run:
         run = {"started": time.time(), "git": git_describe(), "metrics": {}}
     run.setdefault("metrics", {})
+    run.setdefault("cache", {})
     return run
+
+
+# Flat directories cargo writes compiled units into. Scanning these is cheap,
+# unlike walking all of target/, and is enough to tell whether a phase actually
+# compiled anything.
+DEPS_DIRS = ("target/debug/deps", "target/release/deps")
+
+
+def compiled_since(start: float) -> bool:
+    """Did cargo write any compilation output after `start` (a time.time())?"""
+    for relative in DEPS_DIRS:
+        directory = ROOT / relative
+        if not directory.is_dir():
+            continue
+        try:
+            for entry in os.scandir(directory):
+                try:
+                    if entry.stat(follow_symlinks=False).st_mtime > start:
+                        return True
+                except OSError:
+                    continue
+        except OSError:
+            continue
+    return False
 
 
 def cmd_run(label: str, argv: list[str]) -> int:
@@ -119,6 +149,7 @@ def cmd_run(label: str, argv: list[str]) -> int:
     if not argv:
         print("metrics: nothing to run", file=sys.stderr)
         return 2
+    wall_start = time.time()
     started = time.monotonic()
     proc = subprocess.Popen(argv)
     _, status, usage = os.wait4(proc.pid, 0)
@@ -131,6 +162,10 @@ def cmd_run(label: str, argv: list[str]) -> int:
         # ru_maxrss is kilobytes on Linux.
         "max_rss_mb": round(usage.ru_maxrss / 1024, 1),
     }
+    # Timings only mean anything between phases that did comparable work. A
+    # fully cached cargo phase is seconds faster than one that compiled, which
+    # otherwise reads as a spectacular improvement.
+    run["cache"][label] = "cold" if compiled_since(wall_start) else "warm"
     save(CURRENT, run)
 
     if os.WIFSIGNALED(status):
@@ -295,6 +330,10 @@ def cmd_probe(binary: str, seconds: float, poll_interval_ms: int) -> int:
         shutil.rmtree(workdir, ignore_errors=True)
 
 
+# Metrics that depend on how much the phase actually had to compile.
+CACHE_SENSITIVE = {"wall_s", "cpu_s", "max_rss_mb"}
+
+
 def classify(metric: str, old: float, new: float) -> str:
     delta = new - old
     floor = ABSOLUTE_FLOOR.get(metric, 0.0)
@@ -324,24 +363,53 @@ def cmd_report(fail_on_regression: bool) -> int:
         print(f"{run.get('git', '?')} -- first run, nothing to compare against yet")
 
     regressions = []
+    skipped = 0
+    cache_now = run.get("cache", {})
+    cache_then = previous.get("cache", {})
     width = max((len(g) for g in run["metrics"]), default=8)
     for group in sorted(run["metrics"]):
+        state_now = cache_now.get(group)
+        state_then = cache_then.get(group)
+        # "cold" means the phase compiled something, "warm" means it was fully
+        # cached. Shown on every line so a fast run is never mistaken for a win.
+        tag = f" [{state_now}]" if state_now else ""
         for metric in sorted(run["metrics"][group]):
             new = run["metrics"][group][metric]
             unit = UNITS.get(metric, "")
             old = prev_metrics.get(group, {}).get(metric)
-            line = f"  {group:<{width}}  {metric:<18} {new:>10.2f}{unit}"
+            line = f"  {group:<{width}}  {metric:<18} {new:>9.2f}{unit}{tag}"
             if old is None:
-                print(f"{line}      (new)")
+                print(f"{line}   (new)")
+                continue
+            was = f"   was {old:>9.2f}{unit}"
+            if state_then:
+                was += f" [{state_then}]"
+            mismatch = (
+                metric in CACHE_SENSITIVE
+                and state_now is not None
+                and state_then is not None
+                and state_now != state_then
+            )
+            if mismatch:
+                # A cold phase against a warm one says nothing about the code.
+                print(f"{line}{was}   not comparable ({state_then} -> {state_now})")
+                skipped += 1
                 continue
             verdict = classify(metric, old, new)
             delta = new - old
             pct = f"{delta / old * 100:+.0f}%" if old else "n/a"
             mark = {"same": "", "worse": "  REGRESSION", "better": "  improved"}[verdict]
-            print(f"{line}   was {old:>10.2f}{unit}  {pct:>6}{mark}")
+            print(f"{line}{was}  {pct:>6}{mark}")
             if verdict == "worse":
                 regressions.append(f"{group}.{metric} {old:.2f} -> {new:.2f}{unit}")
 
+    if skipped:
+        print()
+        print(
+            f"{skipped} timing/memory comparison(s) skipped: the build cache state "
+            "differed between runs. For comparable build timings, run both with a "
+            "warm cache, or `cargo clean` before each."
+        )
     if regressions:
         print()
         print(f"{len(regressions)} regression(s) past the {RELATIVE_THRESHOLD:.0%} threshold:")
