@@ -11,7 +11,7 @@ use std::time::Duration;
 
 use anyhow::{Context, Result};
 use tokio::sync::watch;
-use zbus::export::futures_util::StreamExt;
+use futures_util::StreamExt;
 use zbus::proxy::CacheProperties;
 use zbus::{Connection, fdo::DBusProxy};
 

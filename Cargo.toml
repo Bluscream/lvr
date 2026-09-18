@@ -27,6 +27,7 @@ tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
 zbus = "5.19.0"
 sd-notify = "0.5.0"
 steamlocate = "2.1.1"
+futures-util = { version = "0.3.34", default-features = false, features = ["std"] }
 
 
 

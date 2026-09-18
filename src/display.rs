@@ -75,7 +75,6 @@ impl ParsedMode {
 struct OutputInfo {
     id: String,
     name: String,
-    connected: bool,
     enabled: bool,
     is_virtual: bool,
 }
@@ -123,10 +122,6 @@ fn query_outputs() -> Option<Vec<OutputInfo>> {
                 .and_then(|n| n.as_str())
                 .unwrap_or("")
                 .to_string();
-            let connected = o
-                .get("connected")
-                .and_then(|c| c.as_bool())
-                .unwrap_or(false);
             let enabled = o.get("enabled").and_then(|e| e.as_bool()).unwrap_or(false);
             let name_upper = name.to_ascii_uppercase();
             let is_virtual = name_upper.contains("VIRTUAL")
@@ -137,7 +132,6 @@ fn query_outputs() -> Option<Vec<OutputInfo>> {
             list.push(OutputInfo {
                 id,
                 name,
-                connected,
                 enabled,
                 is_virtual,
             });

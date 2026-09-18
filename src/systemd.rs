@@ -12,15 +12,25 @@ pub fn notify(message: &str) {
     let state = match message.split('=').next().unwrap_or_default() {
         "READY" => sd_notify::NotifyState::Ready,
         "STOPPING" => sd_notify::NotifyState::Stopping,
-        "WATCHDOG" => sd_notify::NotifyState::Watchdog,
+        "WATCHDOG" => {
+            // sd_notify::notify() sends unconditionally, so the WATCHDOG_PID
+            // guard stays our job: without it a child that inherited
+            // NOTIFY_SOCKET would keep answering its parent's watchdog.
+            // watchdog_enabled() checks WATCHDOG_USEC and WATCHDOG_PID together,
+            // and returns None when no watchdog is configured at all.
+            if sd_notify::watchdog_enabled().is_none() {
+                return;
+            }
+            sd_notify::NotifyState::Watchdog
+        }
         other => {
             tracing::debug!("Ignoring unsupported service notification {other:?}");
             return;
         }
     };
-    // `unset_env = false`: the supervisor notifies repeatedly for the watchdog,
-    // so NOTIFY_SOCKET has to survive the first call.
-    if let Err(err) = sd_notify::notify(false, &[state]) {
+    // Never unset NOTIFY_SOCKET: the supervisor notifies repeatedly, so it has
+    // to survive the first call.
+    if let Err(err) = sd_notify::notify(&[state]) {
         tracing::debug!("Service notification failed: {err}");
     }
 }
