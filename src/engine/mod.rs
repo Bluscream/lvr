@@ -52,6 +52,7 @@ pub struct Engine {
     last_media_block_poll: Option<Instant>,
     virtual_display_created: bool,
     virtual_display_info: Option<String>,
+    steam_launch_options: crate::steam::launch_options::LaunchOptionsCache,
     last_display_count: Option<usize>,
     last_display_poll: Option<Instant>,
     pending_virtual_display_action: Option<(bool, Instant)>,
@@ -84,6 +85,7 @@ impl Engine {
             last_media_block_poll: None,
             virtual_display_created: false,
             virtual_display_info: None,
+            steam_launch_options: crate::steam::launch_options::LaunchOptionsCache::default(),
             last_display_count: None,
             last_display_poll: None,
             pending_virtual_display_action: None,
@@ -296,8 +298,7 @@ impl Engine {
 
         self.update_virtual_display(&config);
 
-        let steam_launch_options =
-            crate::domain_block::dns_shield::read_steam_launch_options().unwrap_or_default();
+        let steam_launch_options = self.steam_launch_options.read_vrchat();
         let steam_shield_active =
             crate::domain_block::dns_shield::is_shield_in_launch_options(&steam_launch_options);
 
