@@ -28,6 +28,10 @@ use self::audio_routing::AudioRouting;
 use self::watchdog::WivrnWatch;
 
 const MEDIA_BLOCK_POLL_INTERVAL: Duration = Duration::from_secs(5);
+/// How often to ask `kscreen-doctor` for the display layout while nothing is
+/// pending. Each query forks `timeout`+`kscreen-doctor`, which costs ~70ms of
+/// Qt startup and KScreen D-Bus traffic, so this must not run every tick.
+const DISPLAY_POLL_INTERVAL: Duration = Duration::from_secs(10);
 
 pub struct Engine {
     shared: Shared,
@@ -49,6 +53,7 @@ pub struct Engine {
     virtual_display_created: bool,
     virtual_display_info: Option<String>,
     last_display_count: Option<usize>,
+    last_display_poll: Option<Instant>,
     pending_virtual_display_action: Option<(bool, Instant)>,
 }
 
@@ -80,6 +85,7 @@ impl Engine {
             virtual_display_created: false,
             virtual_display_info: None,
             last_display_count: None,
+            last_display_poll: None,
             pending_virtual_display_action: None,
         }
     }
@@ -319,6 +325,10 @@ impl Engine {
     }
 
     fn update_virtual_display(&mut self, config: &Config) {
+        if !self.should_poll_displays(config) {
+            return;
+        }
+        self.last_display_poll = Some(Instant::now());
         let Some(current_displays) = display::get_connected_display_count() else {
             return;
         };
@@ -416,6 +426,30 @@ impl Engine {
         }
 
         self.last_display_count = Some(current_displays);
+    }
+
+    /// Whether this tick should spend a `kscreen-doctor` invocation.
+    ///
+    /// Nothing in [`Self::update_virtual_display`] can act unless hotplug
+    /// creation is enabled, we own a virtual display, or a debounced action is
+    /// waiting — so in every other case the query is pure cost and is skipped.
+    /// A waiting action is polled every tick so `debounce_secs` stays accurate;
+    /// otherwise the layout is sampled at [`DISPLAY_POLL_INTERVAL`].
+    fn should_poll_displays(&mut self, config: &Config) -> bool {
+        if self.pending_virtual_display_action.is_some() {
+            return true;
+        }
+        if !config.virtual_display.create_on_last_display_unplugged
+            && !self.virtual_display_created
+        {
+            // Forget the cached count: it would be stale by the time the
+            // feature is switched back on, and a stale count can fake a hotplug.
+            self.last_display_count = None;
+            self.last_display_poll = None;
+            return false;
+        }
+        self.last_display_poll
+            .is_none_or(|last| last.elapsed() >= DISPLAY_POLL_INTERVAL)
     }
 
     async fn stop_all_vr(&mut self) {
