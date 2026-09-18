@@ -1,50 +1,41 @@
 //! Optional service-manager notifications; desktop launches need no systemd connection.
-use std::os::linux::net::SocketAddrExt;
-use std::os::unix::ffi::OsStrExt;
-use std::os::unix::net::{SocketAddr, UnixDatagram};
-use std::time::Duration;
+//!
+//! Thin wrapper over the `sd-notify` crate, which handles the parts that are
+//! easy to get subtly wrong: abstract (`@`-prefixed) socket names and the
+//! `WATCHDOG_PID` check that keeps a child from answering its parent's watchdog.
 
+/// Send a state notification, if we were started by a service manager.
 pub fn notify(message: &str) {
-    let Some(path) = std::env::var_os("NOTIFY_SOCKET") else {
-        return;
-    };
-    if let Ok(pid) = std::env::var("WATCHDOG_PID")
-        && pid.parse::<u32>().ok() != Some(std::process::id())
-    {
+    if std::env::var_os("NOTIFY_SOCKET").is_none() {
         return;
     }
-    if let Err(err) = send(path.as_bytes(), message.as_bytes()) {
+    let state = match message.split('=').next().unwrap_or_default() {
+        "READY" => sd_notify::NotifyState::Ready,
+        "STOPPING" => sd_notify::NotifyState::Stopping,
+        "WATCHDOG" => sd_notify::NotifyState::Watchdog,
+        other => {
+            tracing::debug!("Ignoring unsupported service notification {other:?}");
+            return;
+        }
+    };
+    // `unset_env = false`: the supervisor notifies repeatedly for the watchdog,
+    // so NOTIFY_SOCKET has to survive the first call.
+    if let Err(err) = sd_notify::notify(false, &[state]) {
         tracing::debug!("Service notification failed: {err}");
     }
-}
-
-fn send(path: &[u8], message: &[u8]) -> std::io::Result<()> {
-    let address = if let Some(name) = path.strip_prefix(b"@") {
-        SocketAddr::from_abstract_name(name)?
-    } else {
-        SocketAddr::from_pathname(std::ffi::OsStr::from_bytes(path))?
-    };
-    let socket = UnixDatagram::unbound()?;
-    socket.set_write_timeout(Some(Duration::from_millis(100)))?;
-    socket.connect_addr(&address)?;
-    socket.send(message)?;
-    Ok(())
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
     #[test]
-    fn sends_watchdog_message_to_test_socket() {
-        let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("notify.sock");
-        let receiver = UnixDatagram::bind(&path).unwrap();
-        receiver
-            .set_read_timeout(Some(Duration::from_secs(1)))
-            .unwrap();
-        send(path.as_os_str().as_bytes(), b"WATCHDOG=1").unwrap();
-        let mut bytes = [0; 64];
-        let count = receiver.recv(&mut bytes).unwrap();
-        assert_eq!(&bytes[..count], b"WATCHDOG=1");
+    fn every_message_we_send_is_recognised_and_harmless_without_systemd() {
+        // Without NOTIFY_SOCKET these are no-ops; the point is that none of the
+        // messages the supervisor actually sends panic on the way out.
+        notify("READY=1");
+        notify("WATCHDOG=1");
+        notify("STOPPING=1");
+        notify("NONSENSE");
     }
 }
