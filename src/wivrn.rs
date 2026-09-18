@@ -5,9 +5,13 @@
 //! `Disconnect()` and a `Quit()` method — which is everything `lvr` needs to
 //! supervise it without guessing from the process table.
 
+use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 
 use anyhow::{Context, Result};
+use tokio::sync::watch;
+use zbus::export::futures_util::StreamExt;
 use zbus::proxy::CacheProperties;
 use zbus::{Connection, fdo::DBusProxy};
 
@@ -50,13 +54,32 @@ pub struct WivrnState {
 }
 
 /// Session-bus client. Reconnects lazily so `lvr` can start before WiVRn does.
+///
+/// Liveness comes from `NameOwnerChanged` rather than a `NameHasOwner` call per
+/// tick, and every property on this interface is declared `emits-change`, so the
+/// proxy caches them from `PropertiesChanged` instead of round-tripping. A full
+/// [`Self::poll`] therefore costs no bus traffic at all while nothing moves.
 pub struct WivrnClient {
     connection: Option<Connection>,
+    /// Proxy, tagged with the ownership generation it was built under.
+    proxy: Option<(u64, WivrnServerProxy<'static>)>,
+    /// Latest known ownership of [`BUS_NAME`], maintained by `watcher`.
+    running: Option<watch::Receiver<bool>>,
+    /// Bumped on every ownership change, to invalidate caches belonging to a
+    /// previous owner.
+    generation: Arc<AtomicU64>,
+    watcher: Option<tokio::task::JoinHandle<()>>,
 }
 
 impl WivrnClient {
     pub fn new() -> Self {
-        Self { connection: None }
+        Self {
+            connection: None,
+            proxy: None,
+            running: None,
+            generation: Arc::new(AtomicU64::new(0)),
+            watcher: None,
+        }
     }
 
     async fn connection(&mut self) -> Result<&Connection> {
@@ -78,33 +101,77 @@ impl WivrnClient {
     /// Drop a connection that errored so the next call redials.
     fn reset(&mut self) {
         self.connection = None;
+        self.proxy = None;
+        self.running = None;
+        if let Some(watcher) = self.watcher.take() {
+            watcher.abort();
+        }
     }
 
-    async fn proxy(&mut self) -> Result<WivrnServerProxy<'static>> {
+    /// Connect if needed and make sure the ownership watcher is running.
+    ///
+    /// Returns a receiver that always holds the current ownership of
+    /// [`BUS_NAME`]: seeded once with `NameHasOwner`, then kept current by
+    /// `NameOwnerChanged` signals.
+    async fn ensure_watch(&mut self) -> Result<watch::Receiver<bool>> {
+        if let Some(running) = &self.running {
+            return Ok(running.clone());
+        }
         let connection = self.connection().await?.clone();
-        // Uncached: the server comes and goes, and a stale cache would report a
-        // headset as connected after the server died.
-        WivrnServerProxy::builder(&connection)
-            .cache_properties(CacheProperties::No)
-            .build()
+        let dbus = DBusProxy::new(&connection)
             .await
-            .context("building the WiVRn D-Bus proxy")
+            .context("opening the D-Bus daemon proxy")?;
+
+        // Subscribe before the initial read, so an ownership change racing with
+        // startup is queued rather than missed.
+        let mut changes = dbus
+            .receive_name_owner_changed()
+            .await
+            .context("subscribing to NameOwnerChanged")?;
+        let initial = dbus
+            .name_has_owner(BUS_NAME.try_into().context("WiVRn bus name is invalid")?)
+            .await
+            .context("asking whether WiVRn is on the bus")?;
+
+        let (tx, rx) = watch::channel(initial);
+        let generation = self.generation.clone();
+        self.watcher = Some(tokio::spawn(async move {
+            while let Some(signal) = changes.next().await {
+                let Ok(args) = signal.args() else { continue };
+                if args.name().as_str() != BUS_NAME {
+                    continue;
+                }
+                generation.fetch_add(1, Ordering::SeqCst);
+                // A send failure means the client went away; so should we.
+                if tx.send(args.new_owner().is_some()).is_err() {
+                    return;
+                }
+            }
+        }));
+        self.running = Some(rx.clone());
+        Ok(rx)
+    }
+
+    async fn proxy(&mut self) -> Result<&WivrnServerProxy<'static>> {
+        let generation = self.generation.load(Ordering::SeqCst);
+        // Cached properties belong to one owner; a new owner needs a new proxy.
+        if self.proxy.as_ref().is_none_or(|(built, _)| *built != generation) {
+            let connection = self.connection().await?.clone();
+            let proxy = WivrnServerProxy::builder(&connection)
+                .cache_properties(CacheProperties::Yes)
+                .build()
+                .await
+                .context("building the WiVRn D-Bus proxy")?;
+            self.proxy = Some((generation, proxy));
+        }
+        Ok(&self.proxy.as_ref().expect("just built").1)
     }
 
     /// Is anyone currently owning the WiVRn bus name?
     pub async fn is_running(&mut self) -> bool {
-        let Ok(connection) = self.connection().await.cloned() else {
-            self.reset();
-            return false;
-        };
-        let owned = async {
-            let dbus = DBusProxy::new(&connection).await.ok()?;
-            dbus.name_has_owner(BUS_NAME.try_into().ok()?).await.ok()
-        }
-        .await;
-        match owned {
-            Some(value) => value,
-            None => {
+        match self.ensure_watch().await {
+            Ok(running) => *running.borrow(),
+            Err(_) => {
                 self.reset();
                 false
             }
@@ -114,6 +181,8 @@ impl WivrnClient {
     /// Read everything we care about in one go.
     pub async fn poll(&mut self) -> WivrnState {
         if !self.is_running().await {
+            // Never report a stale headset from an owner that is gone.
+            self.proxy = None;
             return WivrnState::default();
         }
         let Ok(proxy) = self.proxy().await else {
@@ -160,36 +229,51 @@ impl WivrnClient {
 
     /// Wait until the bus name disappears, up to `timeout`.
     pub async fn wait_until_gone(&mut self, timeout: Duration) -> bool {
-        let deadline = tokio::time::Instant::now() + timeout;
-        loop {
-            if !self.is_running().await {
-                return true;
-            }
-            if tokio::time::Instant::now() >= deadline {
-                return false;
-            }
-            tokio::time::sleep(Duration::from_millis(250)).await;
-        }
+        self.wait_until(false, timeout).await
     }
 
     /// Wait until the bus name appears, up to `timeout`.
     pub async fn wait_until_up(&mut self, timeout: Duration) -> bool {
-        let deadline = tokio::time::Instant::now() + timeout;
-        loop {
-            if self.is_running().await {
-                return true;
-            }
-            if tokio::time::Instant::now() >= deadline {
-                return false;
-            }
-            tokio::time::sleep(Duration::from_millis(250)).await;
+        self.wait_until(true, timeout).await
+    }
+
+    /// Wait for ownership to reach `wanted`, up to `timeout`.
+    ///
+    /// Driven by `NameOwnerChanged`, so this settles as soon as the server
+    /// actually appears or exits rather than on the next poll boundary.
+    async fn wait_until(&mut self, wanted: bool, timeout: Duration) -> bool {
+        let Ok(mut running) = self.ensure_watch().await else {
+            self.reset();
+            // Absent a bus, "gone" is true and "up" is not.
+            return !wanted;
+        };
+        if *running.borrow() == wanted {
+            return true;
         }
+        tokio::time::timeout(timeout, async {
+            while running.changed().await.is_ok() {
+                if *running.borrow() == wanted {
+                    return true;
+                }
+            }
+            false
+        })
+        .await
+        .unwrap_or(false)
     }
 }
 
 impl Default for WivrnClient {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+impl Drop for WivrnClient {
+    fn drop(&mut self) {
+        if let Some(watcher) = self.watcher.take() {
+            watcher.abort();
+        }
     }
 }
 
