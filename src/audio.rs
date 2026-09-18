@@ -5,11 +5,110 @@
 //! PulseAudio desktop.
 
 use std::process::Stdio;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use anyhow::{Context, Result, bail};
+use tokio::io::{AsyncBufReadExt, BufReader};
 
 use crate::procs::which;
 use crate::state::AudioDevice;
+
+/// How long to wait before re-attaching after `pactl subscribe` exits.
+const RESUBSCRIBE_DELAY: std::time::Duration = std::time::Duration::from_secs(5);
+
+/// Server-side change notifications, so device state does not have to be polled.
+///
+/// `pactl subscribe` streams a line per change, which keeps this within the
+/// same "shell out, no C dependencies" approach as the rest of the module.
+/// Flags are sticky until read, so an event arriving mid-refresh is picked up
+/// on the following tick rather than lost.
+pub struct DeviceEvents {
+    devices: Arc<AtomicBool>,
+    defaults: Arc<AtomicBool>,
+    task: tokio::task::JoinHandle<()>,
+}
+
+impl DeviceEvents {
+    /// Start watching. Both flags begin set, so the first read populates caches.
+    pub fn spawn() -> Self {
+        let devices = Arc::new(AtomicBool::new(true));
+        let defaults = Arc::new(AtomicBool::new(true));
+        let task = tokio::spawn(watch(devices.clone(), defaults.clone()));
+        Self {
+            devices,
+            defaults,
+            task,
+        }
+    }
+
+    /// Has any sink or source appeared, vanished or changed since the last call?
+    pub fn take_devices_changed(&self) -> bool {
+        self.devices.swap(false, Ordering::SeqCst)
+    }
+
+    /// Has the default sink or source changed since the last call?
+    pub fn take_defaults_changed(&self) -> bool {
+        self.defaults.swap(false, Ordering::SeqCst)
+    }
+}
+
+impl Drop for DeviceEvents {
+    fn drop(&mut self) {
+        self.task.abort();
+    }
+}
+
+/// Follow `pactl subscribe`, re-attaching if the audio server restarts.
+async fn watch(devices: Arc<AtomicBool>, defaults: Arc<AtomicBool>) {
+    loop {
+        if let Err(err) = follow(&devices, &defaults).await {
+            tracing::debug!("Audio event subscription ended: {err:#}");
+        }
+        // Whatever happened, events were missed while detached.
+        devices.store(true, Ordering::SeqCst);
+        defaults.store(true, Ordering::SeqCst);
+        tokio::time::sleep(RESUBSCRIBE_DELAY).await;
+    }
+}
+
+async fn follow(devices: &AtomicBool, defaults: &AtomicBool) -> Result<()> {
+    let program = which("pactl").context("`pactl` not found; is pipewire-pulse installed?")?;
+    let mut child = tokio::process::Command::new(&program)
+        .arg("subscribe")
+        .env("LC_ALL", "C")
+        .env("LANGUAGE", "C")
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .kill_on_drop(true)
+        .spawn()
+        .context("starting `pactl subscribe`")?;
+    let stdout = child.stdout.take().context("pactl subscribe has no stdout")?;
+
+    let mut lines = BufReader::new(stdout).lines();
+    while let Some(line) = lines.next_line().await? {
+        classify(&line, devices, defaults);
+    }
+    Ok(())
+}
+
+/// Route one `pactl subscribe` line to the caches it invalidates.
+///
+/// Lines look like `Event 'change' on sink #42`. Default-device changes are
+/// reported against `server`, not against the device that became default.
+fn classify(line: &str, devices: &AtomicBool, defaults: &AtomicBool) {
+    let Some(target) = line.split(" on ").nth(1) else {
+        return;
+    };
+    let target = target.split(' ').next().unwrap_or_default();
+    match target {
+        "sink" | "source" => devices.store(true, Ordering::SeqCst),
+        "server" => defaults.store(true, Ordering::SeqCst),
+        // sink-input / source-output / client churn is not device state.
+        _ => {}
+    }
+}
 
 /// Which node kind a lookup refers to.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

@@ -19,7 +19,7 @@ serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.140"
 shell-words = "1.1.1"
 sysinfo = "0.39.6"
-tokio = { version = "1.53.1", features = ["rt-multi-thread", "macros", "time", "sync", "process", "signal"] }
+tokio = { version = "1.53.1", features = ["rt-multi-thread", "macros", "time", "sync", "process", "signal", "io-util"] }
 toml = "1.1.4"
 tempfile = "3.27.0"
 tracing = "0.1.44"
