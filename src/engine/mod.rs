@@ -29,10 +29,10 @@ use self::audio_routing::AudioRouting;
 use self::watchdog::WivrnWatch;
 
 const MEDIA_BLOCK_POLL_INTERVAL: Duration = Duration::from_secs(5);
-/// How often to ask `kscreen-doctor` for the display layout while nothing is
-/// pending. Each query forks `timeout`+`kscreen-doctor`, which costs ~70ms of
-/// Qt startup and KScreen D-Bus traffic, so this must not run every tick.
-const DISPLAY_POLL_INTERVAL: Duration = Duration::from_secs(10);
+/// Lower bound between display-layout samples. The check is a handful of small
+/// sysfs reads now rather than a `kscreen-doctor` fork, so this only exists to
+/// bound the cost if `poll_interval_ms` is set very low.
+const DISPLAY_POLL_INTERVAL: Duration = Duration::from_secs(1);
 
 pub struct Engine {
     shared: Shared,

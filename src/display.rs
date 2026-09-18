@@ -6,7 +6,6 @@
 //! forced kernel connectors (e.g. `video=HDMI-A-1:e`).
 
 use std::fs;
-use std::path::Path;
 use std::process::{Child, Command, Stdio};
 use std::sync::Mutex;
 use tracing::{info, warn};
@@ -147,43 +146,36 @@ fn query_outputs() -> Option<Vec<OutputInfo>> {
     Some(list)
 }
 
-/// Check if a display connector actually has an active physical monitor with valid EDID.
-/// This prevents kernel cmdline overrides like `video=HDMI-A-1:e` from tricking the system
-/// into thinking a real monitor is attached when it's just a disconnected port forced enabled.
-fn connector_has_physical_edid(name: &str) -> bool {
-    let drm_dir = Path::new("/sys/class/drm");
-    if let Ok(entries) = fs::read_dir(drm_dir) {
-        for entry in entries.flatten() {
-            let file_name = entry.file_name();
-            let s = file_name.to_string_lossy();
-            // Match cardX-NAME (e.g. card1-DP-3 or card1-HDMI-A-1)
-            if s.ends_with(&format!("-{name}")) {
-                let status_path = entry.path().join("status");
-                let edid_path = entry.path().join("edid");
-                if let Ok(status) = fs::read_to_string(&status_path)
-                    && status.trim() == "connected"
-                    && let Ok(edid) = fs::read(&edid_path)
-                {
-                    return !edid.is_empty();
-                }
-                return false;
-            }
+/// Query the total number of connected physical displays.
+///
+/// Read straight from sysfs rather than by shelling out. This is the one
+/// display query on a timer, and `kscreen-doctor` costs ~70ms of Qt startup and
+/// KScreen D-Bus traffic per call; the kernel already publishes the same facts
+/// in `/sys/class/drm` for the price of a few small reads.
+///
+/// The three conditions mirror the previous filter exactly: `status` replaces
+/// `connected`, `enabled` replaces `enabled`, and a non-empty `edid` rejects a
+/// port forced on by something like `video=HDMI-A-1:e`. Compositor-side virtual
+/// outputs never appear under `/sys/class/drm` at all, so they are excluded for
+/// free and no name-matching heuristic is needed.
+pub fn get_connected_display_count() -> Option<usize> {
+    let mut count = 0;
+    for entry in fs::read_dir("/sys/class/drm").ok()?.flatten() {
+        let path = entry.path();
+        // Connector directories are cardX-NAME; skip cardX, renderD*, version.
+        if !entry.file_name().to_string_lossy().contains('-') {
+            continue;
+        }
+        let connected = fs::read_to_string(path.join("status"))
+            .is_ok_and(|status| status.trim() == "connected");
+        let enabled =
+            fs::read_to_string(path.join("enabled")).is_ok_and(|on| on.trim() == "enabled");
+        let has_edid = fs::read(path.join("edid")).is_ok_and(|edid| !edid.is_empty());
+        if connected && enabled && has_edid {
+            count += 1;
         }
     }
-    // Fallback: If sysfs DRM can't be read, trust kscreen-doctor's connected status
-    true
-}
-
-/// Query the total number of connected physical displays.
-pub fn get_connected_display_count() -> Option<usize> {
-    Some(
-        query_outputs()?
-            .into_iter()
-            .filter(|o| {
-                o.connected && o.enabled && !o.is_virtual && connector_has_physical_edid(&o.name)
-            })
-            .count(),
-    )
+    Some(count)
 }
 
 /// Create/enable a virtual display.
