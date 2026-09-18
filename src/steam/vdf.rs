@@ -91,36 +91,6 @@ fn block_end(text: &str, path: &[&str]) -> Option<usize> {
     None
 }
 
-/// Read repeated leaf values, e.g. libraryfolders' path fields.
-pub fn values_for_key(text: &str, key: &str) -> Vec<String> {
-    let mut index = 0;
-    let mut result = Vec::new();
-    while index < text.len() {
-        if text.as_bytes()[index] == b'"' {
-            let Some((token, _, end)) = read_string(text, index) else {
-                break;
-            };
-            index = end;
-            if token.eq_ignore_ascii_case(key) {
-                while text
-                    .as_bytes()
-                    .get(index)
-                    .is_some_and(u8::is_ascii_whitespace)
-                {
-                    index += 1;
-                }
-                if let Some((value, _, end)) = read_string(text, index) {
-                    result.push(value);
-                    index = end;
-                }
-            }
-        } else {
-            index += 1;
-        }
-    }
-    result
-}
-
 /// Walk a Steam text VDF and return the byte range of the value belonging to
 /// `key_path`. Matching is case-insensitive (Steam is inconsistent) and the
 /// path may skip intermediate levels, so `["apps", "438100", "LaunchOptions"]`

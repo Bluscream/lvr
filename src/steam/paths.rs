@@ -38,11 +38,26 @@ impl SteamPaths {
     }
 }
 
+/// Every Steam installation on this machine.
+///
+/// `steamlocate` knows about more layouts than the three paths this used to
+/// hardcode — snap, the flatpak `.steam/steam` and `.steam/root` variants,
+/// `.steam/debian-installation`, `XDG_DATA_HOME` — and deduplicates installs
+/// that are symlinks of each other.
 pub fn default_roots() -> Vec<PathBuf> {
+    let located: Vec<PathBuf> = steamlocate::locate_all()
+        .unwrap_or_default()
+        .iter()
+        .map(|dir| dir.path().to_path_buf())
+        .collect();
+    if !located.is_empty() {
+        return located;
+    }
+    // steamlocate requires a `steamapps` directory to accept a candidate. Fall
+    // back to the old guesses rather than disabling domain blocking outright.
     let home = directories::BaseDirs::new()
         .map(|d| d.home_dir().to_path_buf())
         .unwrap_or_else(|| PathBuf::from("/root"));
-
     vec![
         home.join(".local/share/Steam"),
         home.join(".steam/steam"),
@@ -91,13 +106,9 @@ pub fn find_localconfig(root: &Path, app_id: &str) -> Result<PathBuf> {
 /// Steam library roots, including additional drives listed by Steam itself.
 pub fn library_roots() -> Vec<PathBuf> {
     let mut roots = default_roots();
-    for root in roots.clone() {
-        if let Ok(text) = fs::read_to_string(root.join("steamapps/libraryfolders.vdf")) {
-            roots.extend(
-                super::vdf::values_for_key(&text, "path")
-                    .into_iter()
-                    .map(PathBuf::from),
-            );
+    for dir in steamlocate::locate_all().unwrap_or_default() {
+        if let Ok(paths) = dir.library_paths() {
+            roots.extend(paths);
         }
     }
     roots.sort();
