@@ -3,7 +3,7 @@
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result, anyhow, bail};
 use sysinfo::{ProcessRefreshKind, ProcessesToUpdate, RefreshKind, System, UpdateKind};
@@ -81,10 +81,27 @@ impl ProcSnapshot {
     }
 }
 
+/// Longest a snapshot may be reused before a full refresh happens regardless.
+///
+/// New pids force a refresh on their own, so this only exists to catch a
+/// process that changed its command line in place via `exec` without the pid
+/// set moving.
+const FULL_RESCAN_INTERVAL: Duration = Duration::from_secs(30);
+
 /// Repeatedly scans the process table, reusing one `System` for efficiency.
+///
+/// A full refresh reads the name, exe and full argv of every process, which is
+/// by far the most expensive thing the supervisor does. Most ticks do not need
+/// one: if no pid has appeared since the last scan, the only thing that can
+/// have changed is that some pids went away, and that is answered by pruning
+/// the previous snapshot.
 pub struct ProcessScanner {
     system: System,
     self_pid: u32,
+    cached: ProcSnapshot,
+    /// Every pid in `/proc` at the last full scan, ours and other users' alike.
+    known_pids: HashSet<u32>,
+    last_full: Option<Instant>,
 }
 
 impl ProcessScanner {
@@ -99,10 +116,35 @@ impl ProcessScanner {
         Self {
             system: System::new_with_specifics(refresh),
             self_pid: std::process::id(),
+            cached: ProcSnapshot::default(),
+            known_pids: HashSet::new(),
+            last_full: None,
         }
     }
 
+    /// The current process table, refreshed only as much as it has to be.
     pub fn scan(&mut self) -> ProcSnapshot {
+        let live = read_pids();
+        let due = self
+            .last_full
+            .is_none_or(|last| last.elapsed() >= FULL_RESCAN_INTERVAL);
+        // A pid we have never seen means something started, and only a full
+        // refresh can tell us what its command line is.
+        let appeared = !live.is_subset(&self.known_pids);
+
+        if due || appeared {
+            self.full_scan(live);
+        } else {
+            // Nothing new; the snapshot can only have lost entries.
+            self.cached.procs.retain(|proc| live.contains(&proc.pid));
+            self.known_pids = live;
+        }
+        self.cached.clone()
+    }
+
+    fn full_scan(&mut self, live: HashSet<u32>) {
+        self.last_full = Some(Instant::now());
+        self.known_pids = live;
         let refresh = ProcessRefreshKind::nothing()
             .with_cmd(UpdateKind::Always)
             .with_user(UpdateKind::OnlyIfNotSet)
@@ -139,8 +181,22 @@ impl ProcessScanner {
             })
             .filter(|p| p.pid != self.self_pid)
             .collect();
-        ProcSnapshot { procs }
+        self.cached = ProcSnapshot { procs };
     }
+}
+
+/// Every pid currently in `/proc`, by directory listing alone.
+///
+/// Deliberately reads no files: this runs every tick purely to decide whether
+/// the expensive scan is needed, so it must stay far cheaper than that scan.
+fn read_pids() -> HashSet<u32> {
+    let Ok(entries) = std::fs::read_dir("/proc") else {
+        return HashSet::new();
+    };
+    entries
+        .flatten()
+        .filter_map(|entry| entry.file_name().to_str()?.parse::<u32>().ok())
+        .collect()
 }
 
 impl Default for ProcessScanner {
