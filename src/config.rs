@@ -168,7 +168,9 @@ pub struct General {
     /// egui zoom factor. Bumped above 1.0 so buttons stay hittable with VR
     /// controllers / from across the room.
     pub ui_scale: f32,
-    /// Supervisor tick interval.
+    /// Supervisor tick interval. The tick is what drives process matching, so
+    /// this is the dominant idle cost and the latency bound on companion-app
+    /// triggers at the same time.
     pub poll_interval_ms: u64,
     /// Start with the window hidden (tray only).
     pub start_hidden: bool,
@@ -197,7 +199,7 @@ impl Default for General {
     fn default() -> Self {
         Self {
             ui_scale: 1.25,
-            poll_interval_ms: 1000,
+            poll_interval_ms: 2000,
             start_hidden: true,
             close_to_tray: true,
             vrchat_match: vec!["vrchat.exe".into()],
