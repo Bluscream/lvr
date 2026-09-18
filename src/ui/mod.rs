@@ -184,8 +184,10 @@ impl LvrApp {
 
     /// Persist config edits a moment after the user stops fiddling.
     fn autosave(&mut self) {
-        let current = self.shared.config_snapshot();
-        if current == self.saved_config {
+        // Compare in place. This runs on every frame and is almost always a
+        // no-op, so it must not deep-clone the whole config to find that out;
+        // the derived PartialEq bails at the first differing field.
+        if *self.shared.config() == self.saved_config {
             self.dirty_since = None;
             return;
         }
