@@ -14,6 +14,9 @@ deploy=no
 autostart=no
 test_only=no
 uninstall=no
+metrics=yes
+probe=no
+fail_on_regression=no
 wine_arg=--skip-wine-test
 for arg in "$@"; do
     case "$arg" in
@@ -24,14 +27,31 @@ for arg in "$@"; do
         --wine-test) wine_arg=--wine-test ;;
         --skip-wine-test) wine_arg=--skip-wine-test ;;
         --uninstall) uninstall=yes ;;
+        --no-metrics) metrics=no ;;
+        --probe) probe=yes ;;
+        --fail-on-regression) fail_on_regression=yes ;;
         -h|--help)
             echo 'Usage: scripts/build.sh [--deploy] [--autostart|--no-autostart] [--test-only] [--wine-test|--skip-wine-test] [--uninstall]'
+            echo '                        [--no-metrics] [--probe] [--fail-on-regression]'
             echo 'Overrides: GETADDRINFO_DIR, BIN_DIR, LIB_DIR, APP_DIR, ICON_DIR, UNIT_DIR, AUTOSTART_DIR, DESKTOP_ID'
+            echo
+            echo 'Timing, peak memory and binary size are recorded per phase and diffed against'
+            echo 'the previous run (.metrics/). --probe additionally launches the freshly built'
+            echo 'binary hidden and isolated to measure its idle CPU, which is the only check'
+            echo 'that catches a runtime regression; it needs a Wayland session and ~35s.'
             exit 0 ;;
         *) echo "Unknown option: $arg" >&2; exit 2 ;;
     esac
 done
 case "$DESKTOP_ID" in *[!a-zA-Z0-9._-]*|'') echo 'Invalid DESKTOP_ID' >&2; exit 2 ;; esac
+report_metrics() {
+    [ "$metrics" = yes ] || return 0
+    if [ "$fail_on_regression" = yes ]; then
+        python3 "$SOURCE_DIR/scripts/metrics.py" report --fail-on-regression
+    else
+        python3 "$SOURCE_DIR/scripts/metrics.py" report
+    fi
+}
 if [ "$uninstall" = yes ]; then
     if [ -f "$UNIT_DIR/$DESKTOP_ID.service" ]; then
         systemctl --user disable --now "$DESKTOP_ID.service"
@@ -43,20 +63,43 @@ if [ "$uninstall" = yes ]; then
     exit 0
 fi
 cd "$SOURCE_DIR"
-cargo fmt -- --check
-cargo clippy --locked --all-targets -- -D warnings
-cargo test --locked
-python3 -m unittest discover -s tests -p 'test_*.py'
+# Each phase is timed and its peak memory recorded, then diffed against the
+# previous run at the end. `phase` never captures or filters output: compiler
+# warnings and test notices have to stay visible.
+if [ "$metrics" = yes ]; then
+    python3 "$SOURCE_DIR/scripts/metrics.py" begin
+    phase() { python3 "$SOURCE_DIR/scripts/metrics.py" run "$1" -- "${@:2}"; }
+else
+    phase() { shift; "$@"; }
+fi
+phase fmt cargo fmt -- --check
+phase clippy cargo clippy --locked --all-targets -- -D warnings
+phase test cargo test --locked
+phase pytest python3 -m unittest discover -s tests -p 'test_*.py'
 if [ ! -f "$GETADDRINFO_DIR/scripts/build.sh" ]; then
     echo "getaddrinfo-rs is required at $GETADDRINFO_DIR (override GETADDRINFO_DIR)." >&2
     exit 1
 fi
 "$GETADDRINFO_DIR/scripts/build.sh" --test "$wine_arg"
 resolver_target="$(cargo metadata --manifest-path "$GETADDRINFO_DIR/Cargo.toml" --locked --no-deps --format-version 1 | python3 -c 'import json,sys; print(json.load(sys.stdin)["target_directory"])')"
-LVR_TEST_DNS_LIBRARY="$resolver_target/release/libgetaddrinfo.so" cargo test --locked block_unblock_is_repeatable
-if [ "$test_only" = yes ]; then exit 0; fi
-cargo build --locked --release
-if [ "$deploy" != yes ]; then echo 'Build and checks passed. Use --deploy to install.'; exit 0; fi
+LVR_TEST_DNS_LIBRARY="$resolver_target/release/libgetaddrinfo.so" phase preload_test cargo test --locked block_unblock_is_repeatable
+if [ "$test_only" = yes ]; then
+    report_metrics
+    exit 0
+fi
+phase release_build cargo build --locked --release
+if [ "$metrics" = yes ]; then
+    python3 "$SOURCE_DIR/scripts/metrics.py" record \
+        "artifacts.binary_size_mb=$(python3 -c 'import os,sys; print(os.path.getsize(sys.argv[1]) / 1048576)' "$SOURCE_DIR/target/release/lvr")"
+    if [ "$probe" = yes ]; then
+        python3 "$SOURCE_DIR/scripts/metrics.py" probe --binary "$SOURCE_DIR/target/release/lvr"
+    fi
+fi
+if [ "$deploy" != yes ]; then
+    report_metrics
+    echo 'Build and checks passed. Use --deploy to install.'
+    exit 0
+fi
 # Resolver installation uses the same verified Rust implementation as standalone installs.
 BIN_DIR="$BIN_DIR" LIB_DIR="$LIB_DIR" "$GETADDRINFO_DIR/scripts/build.sh" --deploy --skip-wine-test
 
@@ -97,4 +140,5 @@ if [ "$autostart" = yes ]; then
     echo 'Systemd login startup enabled. The running session was left alone.'
 fi
 if command -v update-desktop-database >/dev/null; then update-desktop-database "$APP_DIR"; fi
+report_metrics
 echo "Installed $BIN_DIR/lvr and the Rust DNS resolver. Restart running applications to load the new library."

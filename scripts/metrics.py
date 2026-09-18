@@ -1,0 +1,405 @@
+#!/usr/bin/env python3
+"""Timing and resource accounting for the build/test flow, with regression detection.
+
+Every phase of `scripts/build.sh` runs through `metrics.py run`, which records
+wall time, CPU time and peak RSS. `metrics.py report` then diffs the whole run
+against the previous one so a slowdown, a memory blow-up or a binary-size jump
+is visible immediately instead of being noticed months later.
+
+    metrics.py begin                     start a run (clears the scratch file)
+    metrics.py run LABEL -- CMD...       time CMD, record it, propagate its exit
+    metrics.py record KEY=VALUE ...      record a bare number (binary size, ...)
+    metrics.py probe --binary PATH       measure the built binary's idle cost
+    metrics.py report                    diff against the last run and store it
+
+State lives in `.metrics/`: `current.json` for the run in progress, `last.json`
+for the previous completed run, `history.jsonl` for everything before that. It
+is machine-specific and gitignored -- comparisons are only meaningful against
+your own previous run on your own hardware.
+"""
+
+from __future__ import annotations
+
+import json
+import os
+import resource
+import shutil
+import subprocess
+import sys
+import tempfile
+import time
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parent.parent
+METRICS_DIR = ROOT / ".metrics"
+CURRENT = METRICS_DIR / "current.json"
+LAST = METRICS_DIR / "last.json"
+HISTORY = METRICS_DIR / "history.jsonl"
+
+# Only flag differences that are both relatively and absolutely meaningful, so
+# ordinary machine noise does not cry wolf on every run.
+RELATIVE_THRESHOLD = 0.15
+ABSOLUTE_FLOOR = {
+    "wall_s": 1.0,
+    "cpu_s": 1.0,
+    "max_rss_mb": 32.0,
+    "binary_size_mb": 0.2,
+    "idle_cpu_pct": 0.2,
+    "idle_rss_mb": 8.0,
+    "idle_reads_per_s": 200.0,
+}
+# Metrics where a larger number is better. Everything here is a cost, so none.
+LOWER_IS_BETTER = True
+
+UNITS = {
+    "wall_s": "s",
+    "cpu_s": "s",
+    "max_rss_mb": "MB",
+    "binary_size_mb": "MB",
+    "idle_cpu_pct": "%",
+    "idle_rss_mb": "MB",
+    "idle_reads_per_s": "/s",
+}
+
+
+def load(path: Path) -> dict:
+    try:
+        return json.loads(path.read_text())
+    except (OSError, ValueError):
+        return {}
+
+
+def save(path: Path, data: dict) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(data, indent=2, sort_keys=True) + "\n")
+
+
+def git_describe() -> str:
+    try:
+        out = subprocess.run(
+            ["git", "-C", str(ROOT), "rev-parse", "--short", "HEAD"],
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+        sha = out.stdout.strip() or "unknown"
+    except (OSError, subprocess.SubprocessError):
+        return "unknown"
+    try:
+        dirty = subprocess.run(
+            ["git", "-C", str(ROOT), "status", "--porcelain"],
+            capture_output=True,
+            text=True,
+            timeout=10,
+        ).stdout.strip()
+    except (OSError, subprocess.SubprocessError):
+        dirty = ""
+    return sha + ("-dirty" if dirty else "")
+
+
+def cmd_begin() -> int:
+    save(CURRENT, {"started": time.time(), "git": git_describe(), "metrics": {}})
+    return 0
+
+
+def current_run() -> dict:
+    run = load(CURRENT)
+    if not run:
+        run = {"started": time.time(), "git": git_describe(), "metrics": {}}
+    run.setdefault("metrics", {})
+    return run
+
+
+def cmd_run(label: str, argv: list[str]) -> int:
+    """Run argv to completion, recording what it cost. Output is never captured.
+
+    Build output goes straight to the terminal: warnings and notes must stay
+    visible, so this deliberately does not intercept or filter any of it.
+    """
+    if not argv:
+        print("metrics: nothing to run", file=sys.stderr)
+        return 2
+    started = time.monotonic()
+    proc = subprocess.Popen(argv)
+    _, status, usage = os.wait4(proc.pid, 0)
+    elapsed = time.monotonic() - started
+
+    run = current_run()
+    run["metrics"][label] = {
+        "wall_s": round(elapsed, 2),
+        "cpu_s": round(usage.ru_utime + usage.ru_stime, 2),
+        # ru_maxrss is kilobytes on Linux.
+        "max_rss_mb": round(usage.ru_maxrss / 1024, 1),
+    }
+    save(CURRENT, run)
+
+    if os.WIFSIGNALED(status):
+        return 128 + os.WTERMSIG(status)
+    return os.WEXITSTATUS(status)
+
+
+def cmd_record(pairs: list[str]) -> int:
+    run = current_run()
+    for pair in pairs:
+        if "=" not in pair:
+            print(f"metrics: expected KEY=VALUE, got {pair!r}", file=sys.stderr)
+            return 2
+        key, _, raw = pair.partition("=")
+        try:
+            value = float(raw)
+        except ValueError:
+            print(f"metrics: {key} is not a number: {raw!r}", file=sys.stderr)
+            return 2
+        group, _, metric = key.partition(".")
+        if not metric:
+            group, metric = "artifacts", group
+        run["metrics"].setdefault(group, {})[metric] = round(value, 3)
+    save(CURRENT, run)
+    return 0
+
+
+PROBE_CONFIG = """\
+# Generated by scripts/metrics.py for an idle-cost measurement. Disposable.
+#
+# autostart MUST stay empty and MUST stay above every table header: Config is
+# #[serde(default)], so omitting it substitutes the bundled example entries and
+# this throwaway instance would start and stop the real companion apps.
+autostart = []
+
+[general]
+poll_interval_ms = {poll_interval_ms}
+start_hidden = true
+close_to_tray = true
+vrchat_match = ["vrchat.exe"]
+log_capacity = 1000
+
+[wivrn]
+watchdog = false
+start_command = ""
+
+[audio]
+enabled = false
+
+[virtual_display]
+create_on_startup = false
+create_on_last_display_unplugged = false
+
+[domain_block]
+prefix = "{prefix}"
+load_community_blocklists = false
+community_sources = []
+
+[domain_block.blocked]
+video_blocked = false
+image_blocked = false
+string_blocked = false
+shared_blocked = false
+custom_blocked = {{}}
+"""
+
+# Sockets the app needs to reach from inside its private runtime directory.
+PASSTHROUGH_SOCKETS = ("wayland-0", "wayland-0.lock", "pipewire-0", "bus")
+
+
+def read_cpu_and_io(pid: int) -> tuple[float, int, float]:
+    fields = Path(f"/proc/{pid}/stat").read_text().rsplit(")", 1)[1].split()
+    ticks = int(fields[11]) + int(fields[12])
+    rchar = syscr = 0
+    for line in Path(f"/proc/{pid}/io").read_text().splitlines():
+        key, _, value = line.partition(":")
+        if key == "syscr":
+            syscr = int(value)
+    rss_kb = int(Path(f"/proc/{pid}/statm").read_text().split()[1]) * (
+        os.sysconf("SC_PAGE_SIZE") // 1024
+    )
+    return ticks, syscr, rss_kb
+
+
+def cmd_probe(binary: str, seconds: float, poll_interval_ms: int) -> int:
+    """Launch the built binary hidden, in isolation, and measure what it costs idle.
+
+    This is the only check that catches a runtime CPU regression -- the kind
+    where the build gets no slower but the app burns a core in the tray. The
+    instance is fully isolated: its own runtime directory (so it cannot touch
+    the real single-instance socket), and a config with no autostart entries and
+    no domain blocking, so it manages nothing on the live system.
+    """
+    binary_path = Path(binary)
+    if not binary_path.is_file():
+        print(f"metrics: no binary at {binary_path}, skipping probe", file=sys.stderr)
+        return 0
+    host_runtime = os.environ.get("XDG_RUNTIME_DIR")
+    if not host_runtime or not Path(host_runtime, "wayland-0").exists():
+        print("metrics: no Wayland session, skipping idle probe", file=sys.stderr)
+        return 0
+
+    # Keep the directory short: the IPC socket path must fit in sockaddr_un.
+    runtime = Path(tempfile.mkdtemp(prefix="lvrm", dir="/tmp"))
+    workdir = Path(tempfile.mkdtemp(prefix="lvrmcfg"))
+    proc = None
+    try:
+        for name in PASSTHROUGH_SOCKETS:
+            source = Path(host_runtime, name)
+            if source.exists():
+                os.symlink(source, runtime / name)
+        prefix = workdir / "prefix"
+        (prefix / "pfx/drive_c/windows/system32/drivers/etc").mkdir(parents=True)
+        config = workdir / "config.toml"
+        config.write_text(
+            PROBE_CONFIG.format(prefix=prefix, poll_interval_ms=poll_interval_ms)
+        )
+
+        env = dict(os.environ)
+        env["XDG_RUNTIME_DIR"] = str(runtime)
+        env["LVR_CONFIG"] = str(config)
+        env["LVR_LOG"] = "warn"
+        proc = subprocess.Popen(
+            [str(binary_path), "--hidden"],
+            env=env,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            start_new_session=True,
+        )
+
+        settle = 15.0
+        time.sleep(settle)
+        if proc.poll() is not None:
+            print("metrics: probe instance exited early, skipping", file=sys.stderr)
+            return 0
+
+        start_ticks, start_syscr, _ = read_cpu_and_io(proc.pid)
+        time.sleep(seconds)
+        end_ticks, end_syscr, rss_kb = read_cpu_and_io(proc.pid)
+
+        hz = os.sysconf("SC_CLK_TCK")
+        cpu_pct = (end_ticks - start_ticks) / hz / seconds * 100
+        reads_per_s = (end_syscr - start_syscr) / seconds
+        return cmd_record(
+            [
+                f"idle.idle_cpu_pct={cpu_pct:.3f}",
+                f"idle.idle_rss_mb={rss_kb / 1024:.1f}",
+                f"idle.idle_reads_per_s={reads_per_s:.0f}",
+            ]
+        )
+    except (OSError, ValueError) as err:
+        print(f"metrics: idle probe failed ({err}), skipping", file=sys.stderr)
+        return 0
+    finally:
+        if proc is not None and proc.poll() is None:
+            proc.terminate()
+            try:
+                proc.wait(timeout=10)
+            except subprocess.TimeoutExpired:
+                proc.kill()
+        shutil.rmtree(runtime, ignore_errors=True)
+        shutil.rmtree(workdir, ignore_errors=True)
+
+
+def classify(metric: str, old: float, new: float) -> str:
+    delta = new - old
+    floor = ABSOLUTE_FLOOR.get(metric, 0.0)
+    if abs(delta) < floor:
+        return "same"
+    if old > 0 and abs(delta) / old < RELATIVE_THRESHOLD:
+        return "same"
+    worse = delta > 0 if LOWER_IS_BETTER else delta < 0
+    return "worse" if worse else "better"
+
+
+def cmd_report(fail_on_regression: bool) -> int:
+    run = load(CURRENT)
+    if not run or not run.get("metrics"):
+        print("metrics: nothing recorded for this run", file=sys.stderr)
+        return 0
+    run["finished"] = time.time()
+    previous = load(LAST)
+    prev_metrics = previous.get("metrics", {})
+
+    print()
+    print("=== build metrics ===")
+    if previous:
+        when = time.strftime("%Y-%m-%d %H:%M", time.localtime(previous.get("finished", 0)))
+        print(f"comparing {run.get('git', '?')} against {previous.get('git', '?')} ({when})")
+    else:
+        print(f"{run.get('git', '?')} -- first run, nothing to compare against yet")
+
+    regressions = []
+    width = max((len(g) for g in run["metrics"]), default=8)
+    for group in sorted(run["metrics"]):
+        for metric in sorted(run["metrics"][group]):
+            new = run["metrics"][group][metric]
+            unit = UNITS.get(metric, "")
+            old = prev_metrics.get(group, {}).get(metric)
+            line = f"  {group:<{width}}  {metric:<18} {new:>10.2f}{unit}"
+            if old is None:
+                print(f"{line}      (new)")
+                continue
+            verdict = classify(metric, old, new)
+            delta = new - old
+            pct = f"{delta / old * 100:+.0f}%" if old else "n/a"
+            mark = {"same": "", "worse": "  REGRESSION", "better": "  improved"}[verdict]
+            print(f"{line}   was {old:>10.2f}{unit}  {pct:>6}{mark}")
+            if verdict == "worse":
+                regressions.append(f"{group}.{metric} {old:.2f} -> {new:.2f}{unit}")
+
+    if regressions:
+        print()
+        print(f"{len(regressions)} regression(s) past the {RELATIVE_THRESHOLD:.0%} threshold:")
+        for item in regressions:
+            print(f"  - {item}")
+    print()
+
+    METRICS_DIR.mkdir(parents=True, exist_ok=True)
+    with HISTORY.open("a") as handle:
+        handle.write(json.dumps(run, sort_keys=True) + "\n")
+    save(LAST, run)
+    CURRENT.unlink(missing_ok=True)
+
+    return 1 if (regressions and fail_on_regression) else 0
+
+
+def main(argv: list[str]) -> int:
+    if not argv:
+        print(__doc__)
+        return 2
+    command, rest = argv[0], argv[1:]
+    if command == "begin":
+        return cmd_begin()
+    if command == "run":
+        if "--" not in rest:
+            print("metrics: usage: metrics.py run LABEL -- CMD...", file=sys.stderr)
+            return 2
+        split = rest.index("--")
+        labels = rest[:split]
+        if len(labels) != 1:
+            print("metrics: exactly one LABEL is required", file=sys.stderr)
+            return 2
+        return cmd_run(labels[0], rest[split + 1 :])
+    if command == "record":
+        return cmd_record(rest)
+    if command == "probe":
+        binary = ROOT / "target/release/lvr"
+        seconds, poll = 20.0, 2000
+        index = 0
+        while index < len(rest):
+            if rest[index] == "--binary" and index + 1 < len(rest):
+                binary = Path(rest[index + 1])
+                index += 2
+            elif rest[index] == "--seconds" and index + 1 < len(rest):
+                seconds = float(rest[index + 1])
+                index += 2
+            elif rest[index] == "--poll-interval-ms" and index + 1 < len(rest):
+                poll = int(rest[index + 1])
+                index += 2
+            else:
+                print(f"metrics: unknown probe option {rest[index]!r}", file=sys.stderr)
+                return 2
+        return cmd_probe(str(binary), seconds, poll)
+    if command == "report":
+        return cmd_report("--fail-on-regression" in rest)
+    print(f"metrics: unknown command {command!r}", file=sys.stderr)
+    return 2
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))

@@ -8,3 +8,4 @@
 /c_src/*.so
 __pycache__/
 *.pyc
+/.metrics/
