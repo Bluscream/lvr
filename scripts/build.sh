@@ -74,7 +74,10 @@ else
 fi
 phase fmt cargo fmt -- --check
 phase clippy cargo clippy --locked --all-targets -- -D warnings
-phase test cargo test --locked
+# Compiling the tests and running them are separate costs with separate causes:
+# one tracks build complexity, the other tracks the suite itself.
+phase test_compile cargo test --locked --no-run
+phase test_run cargo test --locked
 phase pytest python3 -m unittest discover -s tests -p 'test_*.py'
 if [ ! -f "$GETADDRINFO_DIR/scripts/build.sh" ]; then
     echo "getaddrinfo-rs is required at $GETADDRINFO_DIR (override GETADDRINFO_DIR)." >&2
@@ -89,8 +92,7 @@ if [ "$test_only" = yes ]; then
 fi
 phase release_build cargo build --locked --release
 if [ "$metrics" = yes ]; then
-    python3 "$SOURCE_DIR/scripts/metrics.py" record \
-        "artifacts.binary_size_mb=$(python3 -c 'import os,sys; print(os.path.getsize(sys.argv[1]) / 1048576)' "$SOURCE_DIR/target/release/lvr")"
+    python3 "$SOURCE_DIR/scripts/metrics.py" size "$SOURCE_DIR/target/release/lvr"
     if [ "$probe" = yes ]; then
         python3 "$SOURCE_DIR/scripts/metrics.py" probe --binary "$SOURCE_DIR/target/release/lvr"
     fi

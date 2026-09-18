@@ -6,9 +6,13 @@ use crate::wivrn::WivrnState;
 
 use super::Engine;
 
-/// Minimum spacing between automatic routing retries. Also the fallback
-/// refresh for the default devices if a `pactl subscribe` event is ever missed.
+/// Minimum spacing between automatic routing retries after a partial failure.
+/// This is a retry backoff, not a poll, and must stay short to be useful.
 pub(super) const AUDIO_POLL_INTERVAL: Duration = Duration::from_secs(2);
+/// Fallback refresh for the default sink/source. Each one costs a `pactl` fork,
+/// and `pactl subscribe` reports every change as a `server` event, so this only
+/// has to cover a missed event or a dropped subscription.
+pub(super) const DEFAULTS_POLL_INTERVAL: Duration = Duration::from_secs(60);
 /// Fallback refresh for the device list; events normally trigger it first.
 pub(super) const DEVICE_POLL_INTERVAL: Duration = Duration::from_secs(60);
 
@@ -160,7 +164,7 @@ impl Engine {
         let due_defaults = self.audio_events.take_defaults_changed()
             || self
                 .last_audio_poll
-                .is_none_or(|last| now.duration_since(last) >= AUDIO_POLL_INTERVAL);
+                .is_none_or(|last| now.duration_since(last) >= DEFAULTS_POLL_INTERVAL);
         if due_defaults {
             self.last_audio_poll = Some(now);
             if let Ok(sink) = audio::get_default(Kind::Sink).await {
