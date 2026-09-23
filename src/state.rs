@@ -3,7 +3,8 @@
 use std::collections::VecDeque;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
-use std::sync::{Arc, Mutex, MutexGuard};
+use std::sync::{Arc, Condvar, Mutex, MutexGuard};
+use std::time::Duration;
 
 use chrono::{DateTime, Local};
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender, unbounded_channel};
@@ -249,6 +250,13 @@ struct Inner {
     save_lock: Mutex<()>,
     /// egui repaint handle, installed once the GUI is up.
     repaint: Mutex<Option<egui::Context>>,
+    /// Wakes the main thread while it is parked with no window open.
+    ///
+    /// Wayland cannot hide a mapped surface, so closing to the tray destroys
+    /// the window outright and the GUI loop returns. With no viewport alive
+    /// nothing polls `show_window`, so the tray signals this instead.
+    show_signal: Condvar,
+    show_signal_lock: Mutex<()>,
 }
 
 impl Shared {
@@ -271,6 +279,8 @@ impl Shared {
                 tray_available: AtomicBool::new(true),
                 save_lock: Mutex::new(()),
                 repaint: Mutex::new(None),
+                show_signal: Condvar::new(),
+                show_signal_lock: Mutex::new(()),
             }),
         };
         (shared, rx)
@@ -400,6 +410,33 @@ impl Shared {
     pub fn request_show_window(&self) {
         self.inner.show_window.store(true, Ordering::SeqCst);
         self.wake_gui();
+        // Wakes the main thread when there is no window for `wake_gui` to reach.
+        let _guard = lock(&self.inner.show_signal_lock);
+        self.inner.show_signal.notify_all();
+    }
+
+    /// Park until the window is wanted again, or until we are quitting.
+    ///
+    /// Returns `true` if a window should be opened. Only the main thread calls
+    /// this, and only while no viewport exists.
+    pub fn wait_for_show(&self) -> bool {
+        let mut guard = lock(&self.inner.show_signal_lock);
+        loop {
+            if self.is_quitting() {
+                return false;
+            }
+            if self.inner.show_window.load(Ordering::SeqCst) {
+                return true;
+            }
+            // Timed, so a `set_quitting` that raced the wait cannot park us
+            // forever: the supervisor sets it without holding this lock.
+            let (next, _) = self
+                .inner
+                .show_signal
+                .wait_timeout(guard, Duration::from_millis(500))
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            guard = next;
+        }
     }
 
     pub fn take_show_window(&self) -> bool {
@@ -416,10 +453,18 @@ impl Shared {
         lock(&self.inner.requested_tab).take()
     }
 
+    /// Release a main thread parked in [`Shared::wait_for_show`].
+    pub fn wake_waiter(&self) {
+        let _guard = lock(&self.inner.show_signal_lock);
+        self.inner.show_signal.notify_all();
+    }
+
     pub fn set_quitting(&self) {
         self.inner.quitting.store(true, Ordering::SeqCst);
         // Must reach the GUI loop even when hidden, or the app never closes.
         self.wake_gui();
+        // ...and the main thread, which parks here between tray sessions.
+        self.wake_waiter();
     }
 
     pub fn tray_available(&self) -> bool {

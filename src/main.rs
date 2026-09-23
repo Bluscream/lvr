@@ -164,14 +164,42 @@ fn main() -> Result<()> {
     }
 
     let worker = spawn_worker(shared.clone(), rx, !args.no_tray)?;
-    let native_options = gui_native_options(start_hidden);
 
-    let gui_shared = shared.clone();
-    let result = eframe::run_native(
-        "lvr",
-        native_options,
-        Box::new(move |cc| Ok(Box::new(ui::LvrApp::new(cc, gui_shared, tab)))),
-    );
+    // Wayland cannot hide a window once it is mapped, so closing to the tray
+    // destroys it and `run_native` returns. Park until the tray asks for it
+    // back, then build a fresh one. eframe keeps the winit event loop in a
+    // thread-local and reuses it, so this must stay on the main thread.
+    let mut result = Ok(());
+    let mut tab = tab;
+    let mut open_window = !start_hidden;
+    loop {
+        if open_window {
+            let gui_shared = shared.clone();
+            let start_tab = tab;
+            result = eframe::run_native(
+                "lvr",
+                gui_native_options(false),
+                Box::new(move |cc| Ok(Box::new(ui::LvrApp::new(cc, gui_shared, start_tab)))),
+            );
+            if result.is_err() {
+                break;
+            }
+        }
+        if shared.is_quitting() || !shared.wait_for_show() {
+            break;
+        }
+        // Consume the request we just woke on so the fresh window does not
+        // immediately think it has been asked to show itself again.
+        shared.take_show_window();
+        if let Some(requested) = shared
+            .take_requested_tab()
+            .and_then(|name| ui::Tab::from_name(&name))
+        {
+            tab = requested;
+        }
+        shared.set_window_visible(true);
+        open_window = true;
+    }
 
     shared.set_quitting();
     shared.send(Command::Quit);

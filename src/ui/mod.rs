@@ -504,8 +504,11 @@ impl eframe::App for LvrApp {
             ctx.send_viewport_cmd(ViewportCommand::Close);
         } else if ctx.input(|i| i.viewport().close_requested()) {
             if self.shared.tray_available() && self.shared.config().general.close_to_tray {
-                ctx.send_viewport_cmd(ViewportCommand::CancelClose);
-                ctx.send_viewport_cmd(ViewportCommand::Visible(false));
+                // Let the close go through and destroy the window. Wayland has
+                // no way to hide a mapped surface — winit's `set_visible` is a
+                // documented no-op there — so cancelling the close and asking
+                // for `Visible(false)` left the window on screen. `main` parks
+                // on `wait_for_show` and builds a fresh one when the tray asks.
                 self.shared.set_window_visible(false);
             } else {
                 self.shared.set_quitting();
@@ -538,12 +541,14 @@ impl eframe::App for LvrApp {
         self.stop_all_confirm_window(&ctx);
     }
 
+    /// Runs every time the window goes away — including a close to tray, which
+    /// now genuinely destroys it. So this only persists state; deciding to quit
+    /// belongs to the close handler above and to the tray's Quit item, and
+    /// stopping the supervisor belongs to `main` once its loop ends.
     fn on_exit(&mut self) {
         if let Err(err) = self.shared.save_config() {
             tracing::error!("saving config on exit failed: {err:#}");
         }
-        self.shared.set_quitting();
-        self.shared.send(Command::Quit);
     }
 }
 
