@@ -1,9 +1,9 @@
 name: Build and Update Blocklists
 
 on:
-  schedule:
+  # schedule:
     # Run once daily at 04:00 UTC
-    - cron: '0 4 * * *'
+    #- cron: '0 4 * * *'
   workflow_dispatch:
 
 permissions:
