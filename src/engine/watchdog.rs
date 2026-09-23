@@ -110,20 +110,31 @@ impl Engine {
         if by_user {
             self.watch.suppressed = true;
         }
+
+        let mut graceful_exit = false;
         match self.wivrn.quit().await {
             Ok(true) => {
-                if !self.wivrn.wait_until_gone(WIVRN_SHUTDOWN_TIMEOUT).await {
-                    self.force_kill_wivrn(&config).await;
+                if self.wivrn.wait_until_gone(WIVRN_SHUTDOWN_TIMEOUT).await {
+                    graceful_exit = true;
                 } else {
-                    self.shared.info("WiVRn stopped");
+                    self.shared
+                        .warn("WiVRn did not stop cleanly — force killing");
                 }
             }
-            Ok(false) => self.shared.info("WiVRn was not running"),
+            Ok(false) => {
+                self.shared.info("WiVRn was not reported running on D-Bus");
+            }
             Err(err) => {
                 self.shared
-                    .warn(format!("WiVRn Quit() failed ({err:#}) — killing it"));
-                self.force_kill_wivrn(&config).await;
+                    .warn(format!("WiVRn Quit() failed ({err:#}) — force killing"));
             }
+        }
+
+        // Always ensure flatpak kill and process cleanup runs so no orphaned dashboards or servers remain.
+        self.force_kill_wivrn(&config).await;
+
+        if graceful_exit {
+            self.shared.info("WiVRn stopped");
         }
         self.children.forget("__wivrn__");
         self.watch.missing_since = None;
@@ -136,12 +147,18 @@ impl Engine {
                 .await
                 .is_ok()
         {
-            self.shared.info(format!("Killed flatpak {id}"));
+            self.shared.info(format!("Sent flatpak kill {id}"));
         }
-        let snapshot = self.scanner.scan();
-        let pids = snapshot.matching(&["wivrn-server".into(), "wivrn-dashboard".into()], &[]);
+        // Force a rescan of running processes to catch any standalone or leftover wivrn processes.
+        let snapshot = self.scanner.force_rescan();
+        let patterns = [
+            "wivrn-server".into(),
+            "wivrn-dashboard".into(),
+            "io.github.wivrn.wivrn".into(),
+        ];
+        let pids = snapshot.matching(&patterns, &[]);
         if !pids.is_empty() {
-            procs::stop_pids(&pids, Duration::from_secs(5)).await;
+            procs::stop_pids(&pids, Duration::from_secs(3)).await;
             self.shared
                 .info(format!("Killed {} leftover WiVRn process(es)", pids.len()));
         }
