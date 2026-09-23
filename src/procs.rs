@@ -109,8 +109,26 @@ pub struct ProcessScanner {
     last_full: Option<Instant>,
 }
 
+/// Stop `sysinfo` from holding a `/proc/<pid>/stat` descriptor open per process.
+///
+/// It caches one to avoid reopening the file, and bounds that cache at half of
+/// `RLIMIT_NOFILE`'s *hard* limit. On a systemd user session that hard limit is
+/// 1048576, so the bound lands at ~524k — no bound at all in practice, and the
+/// descriptors accumulate for as long as the supervisor runs. The read path
+/// opens the file every refresh regardless (`_get_stat_data_and_file`), so the
+/// cached handle buys nothing here; at a budget of zero it is simply dropped.
+fn cap_sysinfo_open_files() {
+    static ONCE: std::sync::Once = std::sync::Once::new();
+    // The budget is global and applied as a delta, so this must happen once,
+    // before the first refresh.
+    ONCE.call_once(|| {
+        sysinfo::set_open_files_limit(0);
+    });
+}
+
 impl ProcessScanner {
     pub fn new() -> Self {
+        cap_sysinfo_open_files();
         let refresh = RefreshKind::nothing().with_processes(
             ProcessRefreshKind::nothing()
                 .with_cmd(UpdateKind::Always)
@@ -128,6 +146,13 @@ impl ProcessScanner {
     }
 
     /// The current process table, refreshed only as much as it has to be.
+    /// Force a full rescan of the process table, bypassing interval and pid cache checks.
+    pub fn force_rescan(&mut self) -> SharedSnapshot {
+        let live = read_pids();
+        self.full_scan(live);
+        self.cached.clone()
+    }
+
     pub fn scan(&mut self) -> SharedSnapshot {
         let live = read_pids();
         let due = self
@@ -736,5 +761,39 @@ mod tests {
         std::thread::sleep(Duration::from_millis(200));
         assert_eq!(registry.live_pid("t"), None);
         assert_eq!(registry.live_pid("missing"), None);
+    }
+
+    /// Counts our own open descriptors pointing at a `/proc/<pid>/stat`.
+    fn open_stat_fds() -> usize {
+        let Ok(entries) = std::fs::read_dir("/proc/self/fd") else {
+            return 0;
+        };
+        entries
+            .flatten()
+            .filter(|entry| {
+                std::fs::read_link(entry.path())
+                    .map(|target| target.to_string_lossy().ends_with("/stat"))
+                    .unwrap_or(false)
+            })
+            .count()
+    }
+
+    #[test]
+    fn scanning_does_not_accumulate_stat_descriptors() {
+        let mut scanner = ProcessScanner::new();
+        // The first scan is what populates sysinfo's process map; the baseline
+        // has to be taken after it, so we measure growth and not start-up.
+        scanner.force_rescan();
+        let baseline = open_stat_fds();
+
+        for _ in 0..8 {
+            scanner.force_rescan();
+        }
+
+        let after = open_stat_fds();
+        assert!(
+            after <= baseline,
+            "repeated scans leaked /proc/<pid>/stat descriptors: {baseline} -> {after}"
+        );
     }
 }
