@@ -113,6 +113,29 @@ impl Engine {
         tokio::spawn(async move {
             crate::domain_block::init_from_remote_or_fallback_with_config(&domain_cfg).await;
         });
+        if self.shared.config().domain_block.auto_patch_launch_bridge {
+            let prefix =
+                crate::domain_block::detect_vrc_prefix(&self.shared.config().domain_block.prefix);
+            if let Some(game_dir) = crate::domain_block::detect_vrc_game_dir(prefix.as_deref()) {
+                match crate::domain_block::patch_launch_bridge(&game_dir) {
+                    Ok(true) => self.shared.info(format!(
+                        "Successfully patched VRChat launch.exe with Linux IPC bridge in {}",
+                        game_dir.display()
+                    )),
+                    Ok(false) => self.shared.debug(format!(
+                        "VRChat launch.exe already patched with Linux IPC bridge in {}",
+                        game_dir.display()
+                    )),
+                    Err(err) => self.shared.warn(format!(
+                        "Failed patching VRChat launch.exe in {}: {err:#}",
+                        game_dir.display()
+                    )),
+                }
+            } else {
+                self.shared
+                    .debug("Could not detect VRChat game directory for launch.exe auto-patch");
+            }
+        }
         if self.shared.config().virtual_display.create_on_startup {
             let physical_count = display::get_connected_display_count();
             if physical_count == Some(0) {
@@ -216,13 +239,36 @@ impl Engine {
                 ));
             }
             Command::ReloadAll => {
-                // Clear all throttling timestamps
+                // Reload config from disk if modified
+                let config_path = self.shared.config_path().clone();
+                if let Ok(fresh_config) = crate::config::Config::load_or_create(&config_path) {
+                    *self.shared.config() = fresh_config;
+                }
+
+                // Clear all throttling timestamps and cached keys
                 self.last_device_poll = None;
                 self.last_audio_poll = None;
                 self.last_media_block_poll = None;
+                self.last_display_poll = None;
+                self.last_display_count = None;
+                self.synced_media_block = None;
+                self.steam_launch_options =
+                    crate::steam::launch_options::LaunchOptionsCache::default();
 
                 if let Some(state) = self.shared.config().domain_block.blocked.clone() {
                     self.block_state = state;
+                }
+
+                // Check launch bridge auto-patch if enabled
+                if self.shared.config().domain_block.auto_patch_launch_bridge {
+                    let prefix = crate::domain_block::detect_vrc_prefix(
+                        &self.shared.config().domain_block.prefix,
+                    );
+                    if let Some(game_dir) =
+                        crate::domain_block::detect_vrc_game_dir(prefix.as_deref())
+                    {
+                        let _ = crate::domain_block::patch_launch_bridge(&game_dir);
+                    }
                 }
 
                 // Reload domains
@@ -447,8 +493,7 @@ impl Engine {
         if self.pending_virtual_display_action.is_some() {
             return true;
         }
-        if !config.virtual_display.create_on_last_display_unplugged
-            && !self.virtual_display_created
+        if !config.virtual_display.create_on_last_display_unplugged && !self.virtual_display_created
         {
             // Forget the cached count: it would be stale by the time the
             // feature is switched back on, and a stale count can fake a hotplug.

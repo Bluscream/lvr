@@ -19,6 +19,7 @@ use serde::{Deserialize, Serialize};
 
 mod data;
 pub mod dns_shield;
+pub mod launch_bridge;
 mod prefix;
 #[cfg(test)]
 mod tests;
@@ -27,6 +28,9 @@ pub mod vrchat_config;
 use data::sanitize_domain_map;
 pub use data::{
     active_domains, init_from_remote_or_fallback_with_config, reload_domain_lists_with_config,
+};
+pub use launch_bridge::{
+    LaunchBridgeStatus, check_launch_bridge_status, detect_vrc_game_dir, patch_launch_bridge,
 };
 pub use prefix::{detect_vrc_prefix, prefix_hosts_path, read_block_state, sync_all, vrc_tools_dir};
 

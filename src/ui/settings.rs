@@ -437,7 +437,104 @@ fn render_domains_blocked_grid(
         });
 }
 
-fn render_vrc_prefix_section(app: &LvrApp, ui: &mut Ui, prefix_opt: Option<&std::path::Path>) {
+fn render_vrc_launch_bridge(
+    app: &mut LvrApp,
+    ui: &mut Ui,
+    game_dir_opt: Option<&std::path::Path>,
+    bridge_status: crate::domain_block::LaunchBridgeStatus,
+) {
+    ui.add_space(4.0);
+    egui::Grid::new("settings-vrc-launch-bridge")
+        .num_columns(2)
+        .spacing([14.0, 12.0])
+        .min_col_width(190.0)
+        .show(ui, |ui| {
+            ui.label("Auto-patch launch.exe");
+            {
+                let mut config = app.shared.config();
+                if widgets::toggle(
+                    ui,
+                    &mut config.domain_block.auto_patch_launch_bridge,
+                    "automatically install Linux IPC bridge (vrc-launch-bridge) on startup",
+                ) {
+                    app.send(Command::SaveConfig);
+                }
+            }
+            ui.end_row();
+
+            ui.label("VRChat launch bridge");
+            ui.horizontal(|ui| {
+                let (status_text, color) = match bridge_status {
+                    crate::domain_block::LaunchBridgeStatus::Patched => {
+                        ("Patched (Linux IPC Bridge)", GREEN)
+                    }
+                    crate::domain_block::LaunchBridgeStatus::Unpatched => {
+                        ("Unpatched (Original launch.exe)", ORANGE)
+                    }
+                    crate::domain_block::LaunchBridgeStatus::MissingLaunchExe => {
+                        ("launch.exe Missing", GREY)
+                    }
+                    crate::domain_block::LaunchBridgeStatus::NotDetected => {
+                        ("VRChat Not Detected", GREY)
+                    }
+                };
+
+                let desc = match game_dir_opt {
+                    Some(dir) => format!("Game Directory:\n{}", dir.display()),
+                    None => {
+                        "VRChat game directory could not be located in Steam libraries".to_string()
+                    }
+                };
+                ui.label(RichText::new(status_text).size(12.0).color(color))
+                    .on_hover_text(desc);
+
+                if let Some(dir) = game_dir_opt {
+                    let can_patch =
+                        bridge_status != crate::domain_block::LaunchBridgeStatus::Patched;
+                    let btn_label = if can_patch {
+                        "Patch launch.exe"
+                    } else {
+                        "Re-patch"
+                    };
+                    let btn = egui::Button::new(RichText::new(btn_label).size(11.0).strong())
+                        .corner_radius(egui::CornerRadius::same(6))
+                        .fill(BLUE.gamma_multiply(0.15))
+                        .stroke((1.0, BLUE.gamma_multiply(0.5)));
+
+                    if ui
+                        .add(btn)
+                        .on_hover_text("Install the Linux named-pipe IPC launch bridge into VRChat")
+                        .clicked()
+                    {
+                        match crate::domain_block::patch_launch_bridge(dir) {
+                            Ok(true) => {
+                                app.shared.info(format!(
+                                    "Successfully patched VRChat launch.exe in {}",
+                                    dir.display()
+                                ));
+                            }
+                            Ok(false) => {
+                                app.shared.info("VRChat launch.exe is already up to date");
+                            }
+                            Err(err) => {
+                                app.shared
+                                    .error(format!("Failed to patch launch.exe: {err:#}"));
+                            }
+                        }
+                        app.invalidate_launch_bridge();
+                    }
+                }
+            });
+            ui.end_row();
+        });
+}
+
+fn render_vrc_prefix_section(app: &mut LvrApp, ui: &mut Ui, prefix_opt: Option<&std::path::Path>) {
+    // Cached: locating VRChat and reading `launch.exe` is too costly per frame.
+    let (game_dir_opt, bridge_status) = app.launch_bridge();
+    render_vrc_launch_bridge(app, ui, game_dir_opt.as_deref(), bridge_status);
+
+    ui.add_space(6.0);
     match prefix_opt {
         Some(prefix) => {
             let hosts_file = crate::domain_block::prefix_hosts_path(prefix);

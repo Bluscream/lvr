@@ -330,6 +330,8 @@ pub struct DomainBlockConfig {
     pub load_community_blocklists: bool,
     /// Configured community blocklist sources.
     pub community_sources: Vec<CommunityBlocklistSource>,
+    /// Automatically patch VRChat's launch.exe with the Linux IPC bridge on startup.
+    pub auto_patch_launch_bridge: bool,
 }
 
 impl Default for DomainBlockConfig {
@@ -339,6 +341,7 @@ impl Default for DomainBlockConfig {
             blocked: None,
             load_community_blocklists: true,
             community_sources: default_community_sources(),
+            auto_patch_launch_bridge: true,
         }
     }
 }

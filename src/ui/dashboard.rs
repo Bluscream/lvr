@@ -122,7 +122,12 @@ fn render_telemetry_hud(app: &LvrApp, ui: &mut Ui) {
             } else {
                 ("Idle", GREY)
             };
-            widgets::pill(ui, "XR Session", sess_text, sess_color);
+            if widgets::pill(ui, "XR Session", sess_text, sess_color)
+                .on_hover_text("Click to refresh status and recheck domain shields")
+                .clicked()
+            {
+                app.send(Command::ReloadAll);
+            }
         }
 
         // Virtual Display (appears when active)
@@ -138,7 +143,55 @@ fn render_telemetry_hud(app: &LvrApp, ui: &mut Ui) {
         if app.status.watchdog_paused {
             widgets::pill(ui, "Watchdog", "Paused", ORANGE);
         }
+
+        render_launch_bridge_pill(app, ui);
     });
+}
+
+fn render_launch_bridge_pill(app: &LvrApp, ui: &mut Ui) {
+    let (game_dir, status) = app.launch_bridge();
+    if let Some(dir) = &game_dir {
+        let (status_str, color, tooltip) = match status {
+            crate::domain_block::LaunchBridgeStatus::Patched => (
+                "Patched",
+                GREEN,
+                "VRChat launch.exe is patched with the Linux IPC bridge. Click to re-patch.",
+            ),
+            crate::domain_block::LaunchBridgeStatus::Unpatched => (
+                "Unpatched",
+                ORANGE,
+                "VRChat launch.exe is original (not using Linux IPC bridge). Click to patch.",
+            ),
+            crate::domain_block::LaunchBridgeStatus::MissingLaunchExe => (
+                "Missing",
+                GREY,
+                "launch.exe not found in VRChat game directory.",
+            ),
+            crate::domain_block::LaunchBridgeStatus::NotDetected => {
+                ("Unknown", GREY, "VRChat game directory not detected.")
+            }
+        };
+
+        let pill = widgets::pill(ui, "Launcher", status_str, color).on_hover_text(tooltip);
+        if pill.clicked() {
+            match crate::domain_block::patch_launch_bridge(dir) {
+                Ok(true) => {
+                    app.shared.info(format!(
+                        "Successfully patched VRChat launch.exe in {}",
+                        dir.display()
+                    ));
+                }
+                Ok(false) => {
+                    app.shared.info("VRChat launch.exe is already patched");
+                }
+                Err(err) => {
+                    app.shared
+                        .error(format!("Failed to patch launch.exe: {err:#}"));
+                }
+            }
+            app.invalidate_launch_bridge();
+        }
+    }
 }
 
 /// Section 3: VRChat Domain & Media Shield Controls

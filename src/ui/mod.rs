@@ -7,11 +7,14 @@ mod logs;
 mod settings;
 pub mod widgets;
 
+use std::cell::RefCell;
+use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
 use egui::{RichText, ViewportCommand};
 
 use crate::config::{AutostartEntry, Config, Trigger};
+use crate::domain_block::LaunchBridgeStatus;
 use crate::state::{Command, Shared, Status};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -152,9 +155,28 @@ pub struct LvrApp {
     pub(crate) log_levels: [bool; 4],
     pub(crate) log_filter: String,
     pub(crate) log_wrap: bool,
+    launch_bridge: RefCell<LaunchBridgeProbe>,
 }
 
 const AUTOSAVE_DEBOUNCE: Duration = Duration::from_millis(700);
+
+/// How long a launch-bridge probe stays good for.
+///
+/// Nothing but us patches `launch.exe`, so this only has to be short enough
+/// that the pill notices a change made outside the app within a moment.
+const LAUNCH_BRIDGE_TTL: Duration = Duration::from_secs(2);
+
+/// Cached result of locating VRChat and inspecting its `launch.exe`.
+///
+/// The probe walks every Steam library root and reads `launch.exe` to compare
+/// it against the embedded bridge. That is far too much to redo on each frame
+/// the dashboard paints, so it is cached and refreshed on a timer instead.
+#[derive(Default)]
+struct LaunchBridgeProbe {
+    checked_at: Option<Instant>,
+    game_dir: Option<PathBuf>,
+    status: Option<LaunchBridgeStatus>,
+}
 
 impl LvrApp {
     pub fn new(cc: &eframe::CreationContext<'_>, shared: Shared, tab: Tab) -> Self {
@@ -175,7 +197,39 @@ impl LvrApp {
             log_levels: [false, true, true, true],
             log_filter: String::new(),
             log_wrap: true,
+            launch_bridge: RefCell::new(LaunchBridgeProbe::default()),
         }
+    }
+
+    /// Where VRChat lives and whether its `launch.exe` carries the bridge.
+    ///
+    /// Recomputed at most once per [`LAUNCH_BRIDGE_TTL`]; see
+    /// [`LaunchBridgeProbe`] for why it is not done per frame.
+    pub(crate) fn launch_bridge(&self) -> (Option<PathBuf>, LaunchBridgeStatus) {
+        let mut probe = self.launch_bridge.borrow_mut();
+        let stale = probe
+            .checked_at
+            .is_none_or(|at| at.elapsed() >= LAUNCH_BRIDGE_TTL);
+        if stale {
+            let prefix =
+                crate::domain_block::detect_vrc_prefix(&self.shared.config().domain_block.prefix);
+            let game_dir = crate::domain_block::detect_vrc_game_dir(prefix.as_deref());
+            probe.status = Some(match &game_dir {
+                Some(dir) => crate::domain_block::check_launch_bridge_status(dir),
+                None => LaunchBridgeStatus::NotDetected,
+            });
+            probe.game_dir = game_dir;
+            probe.checked_at = Some(Instant::now());
+        }
+        (
+            probe.game_dir.clone(),
+            probe.status.unwrap_or(LaunchBridgeStatus::NotDetected),
+        )
+    }
+
+    /// Drop the cached probe so the next read reflects a patch we just applied.
+    pub(crate) fn invalidate_launch_bridge(&self) {
+        self.launch_bridge.borrow_mut().checked_at = None;
     }
 
     fn send(&self, command: Command) {
@@ -661,6 +715,13 @@ mod render_tests {
             log_levels: [true; 4],
             log_filter: String::new(),
             log_wrap: true,
+            // Pre-seeded as already probed: rendering must not depend on
+            // whether the machine running the tests has VRChat installed.
+            launch_bridge: RefCell::new(LaunchBridgeProbe {
+                checked_at: Some(Instant::now()),
+                game_dir: None,
+                status: Some(LaunchBridgeStatus::NotDetected),
+            }),
         };
         let context = egui::Context::default();
         install_style(&context);
