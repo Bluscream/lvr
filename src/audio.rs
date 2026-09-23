@@ -84,7 +84,10 @@ async fn follow(devices: &AtomicBool, defaults: &AtomicBool) -> Result<()> {
         .kill_on_drop(true)
         .spawn()
         .context("starting `pactl subscribe`")?;
-    let stdout = child.stdout.take().context("pactl subscribe has no stdout")?;
+    let stdout = child
+        .stdout
+        .take()
+        .context("pactl subscribe has no stdout")?;
 
     let mut lines = BufReader::new(stdout).lines();
     while let Some(line) = lines.next_line().await? {

@@ -10,8 +10,8 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 
 use anyhow::{Context, Result};
-use tokio::sync::watch;
 use futures_util::StreamExt;
+use tokio::sync::watch;
 use zbus::proxy::CacheProperties;
 use zbus::{Connection, fdo::DBusProxy};
 
@@ -155,7 +155,11 @@ impl WivrnClient {
     async fn proxy(&mut self) -> Result<&WivrnServerProxy<'static>> {
         let generation = self.generation.load(Ordering::SeqCst);
         // Cached properties belong to one owner; a new owner needs a new proxy.
-        if self.proxy.as_ref().is_none_or(|(built, _)| *built != generation) {
+        if self
+            .proxy
+            .as_ref()
+            .is_none_or(|(built, _)| *built != generation)
+        {
             let connection = self.connection().await?.clone();
             let proxy = WivrnServerProxy::builder(&connection)
                 .cache_properties(CacheProperties::Yes)
