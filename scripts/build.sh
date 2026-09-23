@@ -130,16 +130,33 @@ service = (source / 'assets/lvr.service').read_text().replace('%h/.local/bin/lvr
 (work / 'lvr.service').write_text(service)
 PY
 install_atomic 644 "$work/lvr.desktop" "$APP_DIR/$DESKTOP_ID.desktop"
+# The systemd unit is the one supported way to start at login. An active XDG
+# entry alongside it means two instances race every login; the single-instance
+# guard in src/ipc.rs makes the loser exit, so nothing breaks loudly, but which
+# instance survives — and therefore its cgroup and any resource limits set on
+# it — becomes a coin toss. Mask the entry rather than delete it: the file is
+# the user's, and a copy of the launcher entry lands here easily (a desktop
+# environment's own autostart UI will happily put one there).
+mask_xdg_autostart() {
+    local entry="$AUTOSTART_DIR/$DESKTOP_ID.desktop"
+    [ -f "$entry" ] || return 0
+    # Already masked; nothing to do and nothing worth backing up over.
+    grep -qix 'Hidden=true' -- "$entry" && return 0
+    cp -p -- "$entry" "$entry.bak"
+    printf '[Desktop Entry]\nType=Application\nName=LinuxVR\nHidden=true\n' > "$entry.new"
+    mv -f -- "$entry.new" "$entry"
+    echo "Masked the competing XDG autostart entry (kept a copy at $entry.bak)."
+}
 if [ "$autostart" = yes ]; then
     install_atomic 644 "$work/lvr.service" "$UNIT_DIR/$DESKTOP_ID.service"
-    # Keep a copy of an old XDG entry, then disable it to prevent competing launchers.
-    if [ -f "$AUTOSTART_DIR/$DESKTOP_ID.desktop" ]; then
-        cp -p -- "$AUTOSTART_DIR/$DESKTOP_ID.desktop" "$AUTOSTART_DIR/$DESKTOP_ID.desktop.bak"
-        printf '[Desktop Entry]\nType=Application\nName=LinuxVR\nHidden=true\n' > "$AUTOSTART_DIR/$DESKTOP_ID.desktop"
-    fi
+    mask_xdg_autostart
     systemctl --user daemon-reload
     systemctl --user enable "$DESKTOP_ID.service"
     echo 'Systemd login startup enabled. The running session was left alone.'
+elif systemctl --user is-enabled --quiet "$DESKTOP_ID.service" 2>/dev/null; then
+    # Startup is already handed to systemd from an earlier run, so an XDG entry
+    # that reappeared since then is a conflict even without --autostart.
+    mask_xdg_autostart
 fi
 if command -v update-desktop-database >/dev/null; then update-desktop-database "$APP_DIR"; fi
 report_metrics
