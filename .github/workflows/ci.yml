@@ -1,8 +1,11 @@
 name: Verify LinuxVR
 on:
-  push:
-    branches: [main]
-  pull_request:
+  workflow_dispatch:
+  # Disabled: workflows do not run under this account, so an automatic trigger here would
+  # never fire. Uncomment if you fork this repository onto an account where Actions run.
+  #   push:
+  #     branches: [main]
+  #   pull_request:
 permissions:
   contents: read
 jobs:
