@@ -139,13 +139,32 @@ install_atomic 644 "$work/lvr.desktop" "$APP_DIR/$DESKTOP_ID.desktop"
 # environment's own autostart UI will happily put one there).
 mask_xdg_autostart() {
     local entry="$AUTOSTART_DIR/$DESKTOP_ID.desktop"
+    local backup_dir="${XDG_STATE_HOME:-$HOME/.local/state}/lvr/autostart"
+    local backup destination
+    mkdir -p -- "$backup_dir"
+    # XDG autostart scans backup copies too; keep old copies out of its directory.
+    for backup in "$entry".bak "$entry".bak-*; do
+        [ -f "$backup" ] || continue
+        destination="$backup_dir/${backup##*/}"
+        if [ -e "$destination" ]; then
+            echo "Refusing to replace existing autostart backup: $destination" >&2
+            return 1
+        fi
+        mv -- "$backup" "$destination"
+        echo "Moved an old autostart backup out of the scan directory: $destination"
+    done
     [ -f "$entry" ] || return 0
     # Already masked; nothing to do and nothing worth backing up over.
     grep -qix 'Hidden=true' -- "$entry" && return 0
-    cp -p -- "$entry" "$entry.bak"
+    backup="$backup_dir/$DESKTOP_ID.desktop-$(date +%Y%m%d-%H%M%S)-$$"
+    if [ -e "$backup" ]; then
+        echo "Refusing to replace existing autostart backup: $backup" >&2
+        return 1
+    fi
+    cp -p -- "$entry" "$backup"
     printf '[Desktop Entry]\nType=Application\nName=LinuxVR\nHidden=true\n' > "$entry.new"
     mv -f -- "$entry.new" "$entry"
-    echo "Masked the competing XDG autostart entry (kept a copy at $entry.bak)."
+    echo "Masked the competing XDG autostart entry (kept a copy at $backup)."
 }
 if [ "$autostart" = yes ]; then
     install_atomic 644 "$work/lvr.service" "$UNIT_DIR/$DESKTOP_ID.service"
